@@ -1,7 +1,7 @@
 using LayerwiseRelevancePropagation
 using LayerwiseRelevancePropagation: in_branch
 using Metalhead
-using Flux
+using Flux, NNlib
 
 model = VGG(11; pretrain=false).layers
 model_flat = flatten_model(model)
