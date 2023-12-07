@@ -51,11 +51,4 @@ export CRP, TopNConcepts, IndexedConcepts
 # utils
 export strip_softmax, flatten_model, canonize
 
-# Package extension backwards compatibility with Julia 1.6.
-# For Julia 1.6, Tullio is treated as a normal dependency and always loaded.
-# https://pkgdocs.julialang.org/v1/creating-packages/#Transition-from-normal-dependency-to-extension
-if !isdefined(Base, :get_extension)
-    include("../ext/TullioLRPRulesExt.jl")
-end
-
 end # module

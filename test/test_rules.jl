@@ -1,4 +1,3 @@
-using LoopVectorization
 using LayerwiseRelevancePropagation
 using LayerwiseRelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
 using LayerwiseRelevancePropagation:
@@ -230,21 +229,6 @@ layers = Dict(
     "Dense_identity" => Dense(Matrix{Float32}(I, dout, din), false, identity),
 )
 @testset "Dense" begin
-    for (rulename, rule) in RULES
-        @testset "$rulename" begin
-            for (layername, layer) in layers
-                @testset "$layername" begin
-                    run_rule_tests(rule, layer, rulename, layername, aᵏ_dense)
-                end
-            end
-        end
-    end
-end
-
-# Test with loaded package extension
-using LoopVectorization
-using Tullio
-@testset "Dense Tullio" begin
     for (rulename, rule) in RULES
         @testset "$rulename" begin
             for (layername, layer) in layers

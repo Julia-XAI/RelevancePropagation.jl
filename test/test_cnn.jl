@@ -1,4 +1,3 @@
-using LoopVectorization
 using LayerwiseRelevancePropagation
 using Flux
 using JLD2

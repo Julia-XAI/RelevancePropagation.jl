@@ -1,10 +1,10 @@
-using LoopVectorization
-using LayerwiseRelevancePropagation
-using Flux
 using Test
 using ReferenceTests
 using Aqua
 using Random
+
+using LayerwiseRelevancePropagation
+using Flux
 
 pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
