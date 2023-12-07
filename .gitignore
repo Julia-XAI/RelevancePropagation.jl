@@ -1,4 +1,24 @@
+# Julia
 *.jl.*.cov
 *.jl.cov
 *.jl.mem
 /Manifest.toml
+
+# Generated files
+/docs/build/
+/docs/src/generated/
+
+# Benchmarking
+/.benchmarkci
+/benchmark/*.json
+
+# Playground
+/_research
+
+# macOS
+.DS_Store
+
+# VSCode
+/.vscode
+
+
