@@ -3,6 +3,8 @@
 *.jl.cov
 *.jl.mem
 /Manifest.toml
+/test/Manifest.toml
+/benchmark/Manifest.toml
 
 # Generated files
 /docs/build/

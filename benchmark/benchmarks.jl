@@ -31,12 +31,8 @@ Flux.testmode!(model, true)
 
 # Use one representative algorithm of each type
 algs = Dict(
-    "Gradient"            => Gradient,
-    "InputTimesGradient"  => InputTimesGradient,
     "LRP"                 => LRP,
     "LREpsilonPlusFlat"   => model -> LRP(model, EpsilonPlusFlat()),
-    "SmoothGrad"          => model -> SmoothGrad(model, 5),
-    "IntegratedGradients" => model -> IntegratedGradients(model, 5),
 )
 
 # Define benchmark
