@@ -1,0 +1,11 @@
+[deps]
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+LayerwiseRelevancePropagation = "0be6dd02-ae9e-43eb-b318-c6e81d6890d8"
+LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+PkgBenchmark = "32113eaa-f34f-5b0d-bd6c-c81e245fc73d"
+Tullio = "bc48ee85-29a4-5162-ae0b-a64e1601d4bc"
+
+[compat]
+BenchmarkTools = "1"
+PkgBenchmark = "0.2"
