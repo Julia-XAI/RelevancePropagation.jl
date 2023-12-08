@@ -540,6 +540,3 @@ function lrp!(Rᵏ, _rule::FlatRule, _layer::Dense, _modified_layer, _aᵏ, Rᵏ
         fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
     end
 end
-
-# Fast implementations for Dense layers can be conditionally loaded with Tullio.jl
-# using package extensions, see exp/TullioRulesExt.jl

@@ -1,6 +1,4 @@
 using BenchmarkTools
-using LoopVectorization
-using Tullio
 using Flux
 using LayerwiseRelevancePropagation
 using LayerwiseRelevancePropagation: lrp!, modify_layer
