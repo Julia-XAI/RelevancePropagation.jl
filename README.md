@@ -26,20 +26,15 @@ using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Me
 ```julia
 using LayerwiseRelevancePropagation
 using Flux
-using Metalhead                   # pre-trained vision models
-using HTTP, FileIO, ImageMagick   # load image from URL
-using ImageInTerminal             # show heatmap in terminal
+using Metalhead                  # pre-trained vision models
 
-# Load model
+# Load & prepare model
 model = VGG(16, pretrain=true).layers
 model = strip_softmax(model)
 model = canonize(model)
 
 # Load input
-url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
-img = load(url)
-input = preprocess_imagenet(img)
-input = reshape(input, 224, 224, 3, :)  # reshape to WHCN format
+input = ...                      # input in WHCN format
 
 # Run XAI method
 composite = EpsilonPlusFlat()
