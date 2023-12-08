@@ -34,9 +34,9 @@ end
 @testset "Concept selectors" begin
     @testset "API" begin
         concepts = TopNConcepts(15)
-        @test LayerwiseRelevancePropagation.number_of_concepts(concepts) == 15
+        @test RelevancePropagation.number_of_concepts(concepts) == 15
         concepts = IndexedConcepts(1:16...)
-        @test LayerwiseRelevancePropagation.number_of_concepts(concepts) == 16
+        @test RelevancePropagation.number_of_concepts(concepts) == 16
 
         @test_throws DimensionMismatch (TopNConcepts(4))(rand(3, 5))
         @test_throws DimensionMismatch (TopNConcepts(4))(rand(5, 5, 3, 5))

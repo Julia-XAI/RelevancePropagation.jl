@@ -1,8 +1,8 @@
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
-using LayerwiseRelevancePropagation:
+using RelevancePropagation
+using RelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
+using RelevancePropagation:
     modify_parameters, modify_weight, modify_bias, modify_layer
-using LayerwiseRelevancePropagation: stabilize_denom
+using RelevancePropagation: stabilize_denom
 using Flux
 using LinearAlgebra: I
 using ReferenceTests

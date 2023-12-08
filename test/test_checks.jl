@@ -1,5 +1,5 @@
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: check_lrp_compat, print_lrp_model_check
+using RelevancePropagation
+using RelevancePropagation: check_lrp_compat, print_lrp_model_check
 using Suppressor
 err = ErrorException("Unknown layer or activation function found in model")
 

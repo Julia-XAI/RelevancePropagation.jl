@@ -1,8 +1,8 @@
 using Flux
 using Flux: flatten
-using LayerwiseRelevancePropagation: flatten_model
-using LayerwiseRelevancePropagation: has_output_softmax, check_output_softmax, activation_fn
-using LayerwiseRelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
+using RelevancePropagation: flatten_model
+using RelevancePropagation: has_output_softmax, check_output_softmax, activation_fn
+using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 using Random
 
 # Test `activation_fn`

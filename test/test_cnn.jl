@@ -1,4 +1,4 @@
-using LayerwiseRelevancePropagation
+using RelevancePropagation
 using Flux
 using JLD2
 

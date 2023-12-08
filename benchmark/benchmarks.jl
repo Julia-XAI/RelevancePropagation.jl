@@ -1,7 +1,7 @@
 using BenchmarkTools
 using Flux
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: lrp!, modify_layer
+using RelevancePropagation
+using RelevancePropagation: lrp!, modify_layer
 
 on_CI = haskey(ENV, "GITHUB_ACTIONS")
 

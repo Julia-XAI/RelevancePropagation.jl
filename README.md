@@ -1,7 +1,7 @@
-# LayerwiseRelevancePropagation.jl
+# RelevancePropagation.jl
 
-[![Build Status](https://github.com/Julia-XAI/LayerwiseRelevancePropagation.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Julia-XAI/LayerwiseRelevancePropagation.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Coverage](https://codecov.io/gh/Julia-XAI/LayerwiseRelevancePropagation.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Julia-XAI/LayerwiseRelevancePropagation.jl)
+[![Build Status](https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl)
 [![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 
 Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
@@ -14,7 +14,7 @@ This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) 
 ## Installation 
 This package supports Julia ≥1.6. To install it, open the Julia REPL and run 
 ```julia-repl
-julia> ]add LayerwiseRelevancePropagation
+julia> ]add RelevancePropagation
 ```
 
 ## Example
@@ -24,7 +24,7 @@ using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Me
 ![][castle]
 
 ```julia
-using LayerwiseRelevancePropagation
+using RelevancePropagation
 using Flux
 using Metalhead                  # pre-trained vision models
 

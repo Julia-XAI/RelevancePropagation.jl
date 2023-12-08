@@ -1,4 +1,4 @@
-# https://julia-xai.github.io/LayerwiseRelevancePropagation.jl/dev/lrp/developer/
+# https://julia-xai.github.io/RelevancePropagation.jl/dev/lrp/developer/
 abstract type AbstractLRPRule end
 
 # Default parameters

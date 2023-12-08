@@ -1,5 +1,5 @@
-using LayerwiseRelevancePropagation: ChainTuple, ParallelTuple, chainmap, chainindices
-using LayerwiseRelevancePropagation: activation_fn
+using RelevancePropagation: ChainTuple, ParallelTuple, chainmap, chainindices
+using RelevancePropagation: activation_fn
 using Flux
 
 x = rand(Float32, 2, 5)

@@ -3,15 +3,15 @@ using ReferenceTests
 using Aqua
 using Random
 
-using LayerwiseRelevancePropagation
+using RelevancePropagation
 using Flux
 
 pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
-@testset "LayerwiseRelevancePropagation.jl" begin
+@testset "RelevancePropagation.jl" begin
     @testset "Aqua.jl" begin
         @info "Running Aqua.jl's auto quality assurance tests. These might print warnings from dependencies."
-        Aqua.test_all(LayerwiseRelevancePropagation; ambiguities=false)
+        Aqua.test_all(RelevancePropagation; ambiguities=false)
     end
     @testset "Utilities" begin
         @info "Testing utilities..."
