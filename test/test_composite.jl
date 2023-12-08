@@ -1,5 +1,5 @@
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: in_branch
+using RelevancePropagation
+using RelevancePropagation: in_branch
 using Metalhead
 using Flux, NNlib
 

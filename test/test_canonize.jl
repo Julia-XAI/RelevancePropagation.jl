@@ -1,7 +1,7 @@
 using Flux
 using Flux: flatten
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: fuse_batchnorm
+using RelevancePropagation
+using RelevancePropagation: fuse_batchnorm
 using Random
 
 batchsize = 50

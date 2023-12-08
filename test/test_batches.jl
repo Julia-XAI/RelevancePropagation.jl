@@ -1,5 +1,5 @@
 using Flux
-using LayerwiseRelevancePropagation
+using RelevancePropagation
 using Random
 
 ## Test `fuse_batchnorm` on Dense and Conv layers

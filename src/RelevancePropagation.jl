@@ -1,4 +1,4 @@
-module LayerwiseRelevancePropagation
+module RelevancePropagation
 
 using Reexport
 @reexport using XAIBase

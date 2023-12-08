@@ -1,6 +1,6 @@
 module LRP_CONFIG
-using LayerwiseRelevancePropagation
-using LayerwiseRelevancePropagation: LRPSupportedLayer, LRPSupportedActivation
+using RelevancePropagation
+using RelevancePropagation: LRPSupportedLayer, LRPSupportedActivation
 
 """
     LRP_CONFIG.supports_layer(layer)
@@ -60,13 +60,13 @@ end
 _MD_CHECK_FAILED = md"""# LRP model check failed
 
     Found unknown layer types or activation functions that are not supported
-    by LayerwiseRelevancePropagation.jl yet.
+    by RelevancePropagation.jl yet.
 
     LRP assumes that the model is a deep rectifier network
     that only contains ReLU-like activation functions.
 
     If you think the missing layer should be supported by default,
-    **please [submit an issue](https://github.com/Julia-XAI/LayerwiseRelevancePropagation.jl/issues)**.
+    **please [submit an issue](https://github.com/Julia-XAI/RelevancePropagation.jl/issues)**.
 
     ## Using custom layers
 
