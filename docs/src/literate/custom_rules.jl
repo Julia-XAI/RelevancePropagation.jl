@@ -3,8 +3,12 @@
 # extensibility for the purpose of research.
 
 # This example will show you how to implement custom LRP rules.
-# building on the basics shown in the [*Getting started*](@ref docs-getting-started) section.
-#
+
+#md # !!! note "Getting started"
+#md # This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
+#md # and builds on the basics shown in the
+#md # [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
+
 # We start out by loading the same pre-trained LeNet5 model and MNIST input data:
 using RelevancePropagation
 using Flux

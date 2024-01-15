@@ -1,6 +1,7 @@
-
 # LRP analyzer
-Refer to [`LRP`](@ref) for documentation on the LRP analyzer.
+```@docs
+LRP
+```
 
 # [LRP rules](@id api-lrp-rules)
 ```@docs
@@ -21,6 +22,13 @@ use `ChainTuple` and `ParallelTuple`, matching the model structure:
 ```@docs
 ChainTuple
 ParallelTuple
+```
+
+# Model preparation
+```@docs
+strip_softmax
+canonize
+flatten_model
 ```
 
 # Composites

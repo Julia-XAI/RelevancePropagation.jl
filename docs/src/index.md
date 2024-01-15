@@ -4,12 +4,18 @@ CurrentModule = RelevancePropagation
 
 # RelevancePropagation.jl
 
-Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
-and [Concept Relevance Propagation][paper-crp] (CRP) 
+Julia implementation of [Layerwise Relevance Propagation](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130140) (LRP) 
+and [Concept Relevance Propagation](https://www.nature.com/articles/s42256-023-00711-8) (CRP) 
 for use with [Flux.jl](https://fluxml.ai) models.
 
-This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
-[ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
+!!! note
+    This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
+    [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
+
+    For an introduction to the Julia-XAI ecosystem, refer to the 
+    [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
+
+
 
 ## Installation 
 To install this package and its dependencies, open the Julia REPL and run 

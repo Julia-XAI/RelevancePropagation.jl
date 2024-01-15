@@ -1,6 +1,8 @@
 # # [Basic usage of LRP](@id docs-lrp-basics)
-# This example will show you best practices for using LRP,
-# building on the basics shown in the [*Getting started*](@ref docs-getting-started) section.
+#md # !!! note "Getting started"
+#md # This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
+#md # and builds on the basics shown in the
+#md # [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
 
 #md # !!! note "TLDR"
 #md #
@@ -80,7 +82,8 @@ analyzer.model
 # By default, the `LRP` constructor will assign the [`ZeroRule`](@ref) to all layers.
 LRP(model)
 
-# This analyzer will return heatmaps that look identical to [`InputTimesGradient`](@ref).
+# This analyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
+# from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
 
 # LRP's strength lies in assigning different rules to different layers,
 # based on their functionality in the neural network[^1].
@@ -102,7 +105,7 @@ LRP(model, composite)
 # `layerwise_relevances=true`.
 #
 # The layerwise relevances can be accessed in the `extras` field
-# of the returned [`Explanation`](@ref):
+# of the returned `Explanation`:
 input = rand(Float32, 32, 32, 3, 1) # dummy input for our convolutional neural network
 
 expl = analyze(input, analyzer; layerwise_relevances=true)
@@ -117,9 +120,38 @@ expl = analyze(input, analyzer; layerwise_relevances=true)
 expl.extras.layerwise_relevances
 
 # ## [Performance tips](@id docs-lrp-performance)
-# ### Using LRP with a GPU
-# Like all other analyzers, LRP can be used on GPUs.
-# Follow the instructions on [*GPU support*](@ref gpu-docs).
+# ### [### Using LRP with a GPU](@id gpu-docs)
+# All LRP analyzers support GPU backends,
+# building on top of [Flux.jl's GPU support](https://fluxml.ai/Flux.jl/stable/gpu/).
+# Using a GPU only requires moving the input array and model weights to the GPU.
+#
+# For example, using [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl):
+
+# ```julia
+# using CUDA, cuDNN
+# using Flux
+# using ExplainableAI
+#
+# # move input array and model weights to GPU
+# input = input |> gpu # or gpu(input)
+# model = model |> gpu # or gpu(model)
+#
+# # analyzers don't require calling `gpu`
+# analyzer = LRP(model)
+#
+# # explanations are computed on the GPU
+# expl = analyze(input, analyzer)
+# ```
+
+# Some operations, like saving, require moving explanations back to the CPU.
+# This can be done using Flux's `cpu` function:
+
+# ```julia
+# val = expl.val |> cpu # or cpu(expl.val)
+#
+# using BSON
+# BSON.@save "explanation.bson" val
+# ```
 #
 # ### Using LRP without a GPU
 # Using Julia's package extension mechanism,

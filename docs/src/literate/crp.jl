@@ -2,7 +2,11 @@
 # In [*From attribution maps to human-understandable explanations through Concept Relevance Propagation*](https://www.nature.com/articles/s42256-023-00711-8) (CRP),
 # Achtibat et al. propose the conditioning of LRP relevances on individual features of a model.
 #
-# This example builds on the basics shown in the [*Getting started*](@ref docs-getting-started) section.
+#md # !!! note "Getting started"
+#md # This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
+#md # and builds on the basics shown in the
+#md # [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
+
 # We start out by loading the same pre-trained LeNet5 model and MNIST input data:
 using RelevancePropagation
 using Flux
