@@ -120,7 +120,7 @@ expl = analyze(input, analyzer; layerwise_relevances=true)
 expl.extras.layerwise_relevances
 
 # ## [Performance tips](@id docs-lrp-performance)
-# ### [### Using LRP with a GPU](@id gpu-docs)
+# ### [Using LRP with a GPU](@id gpu-docs)
 # All LRP analyzers support GPU backends,
 # building on top of [Flux.jl's GPU support](https://fluxml.ai/Flux.jl/stable/gpu/).
 # Using a GPU only requires moving the input array and model weights to the GPU.
