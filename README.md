@@ -1,8 +1,8 @@
 # RelevancePropagation.jl
 
-[![Build Status](https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Coverage](https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl)
-[![Aqua](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
+| **Documentation** | **Build Status** |
+|:----------------- |:---------------- |
+| [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url] | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url] [![Aqua QA][aqua-img]][aqua-url] |
 
 Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
 and [Concept Relevance Propagation][paper-crp] (CRP) 
@@ -70,10 +70,11 @@ whereas regions in blue are of negative relevance.
 > Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF) 
 > for the Berlin Institute for the Foundations of Learning and Data (BIFOLD) (01IS18037A).
 
+<!-- References -->
 [paper-lrp]: https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130140
 [paper-crp]: https://www.nature.com/articles/s42256-023-00711-8
 
-
+<!-- Images -->
 [castle]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg
 [castle-lrp]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle_LRP.png
 [castle-lrp-egb]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle_LRPEpsilonGammaBox.png
@@ -87,3 +88,15 @@ whereas regions in blue are of negative relevance.
 [streetsign-lrp-epf]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/streetsign_LRPEpsilonPlusFlat.png
 [streetsign-lrp-eab]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/streetsign_LRPEpsilonAlpha2Beta1.png
 [streetsign-lrp-eabf]: https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/streetsign_LRPEpsilonAlpha2Beta1Flat.png
+
+<!-- Shields / Badges -->
+[docs-stab-img]: https://img.shields.io/badge/docs-stable-blue.svg
+[docs-stab-url]: https://julia-xai.github.io/RelevancePropagation.jl/stable
+[docs-dev-img]: https://img.shields.io/badge/docs-dev-blue.svg
+[docs-dev-url]: https://julia-xai.github.io/RelevancePropagation.jl/dev
+[ci-img]: https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml/badge.svg?branch=main
+[ci-url]: https://github.com/Julia-XAI/RelevancePropagation.jl/actions/workflows/CI.yml?query=branch%3Amain
+[codecov-img]: https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl/branch/main/graph/badge.svg
+[codecov-url]: https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl
+[aqua-img]: https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg
+[aqua-url]: https://github.com/JuliaTesting/Aqua.jl
