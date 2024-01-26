@@ -9,13 +9,9 @@ and [Concept Relevance Propagation](https://www.nature.com/articles/s42256-023-0
 for use with [Flux.jl](https://fluxml.ai) models.
 
 !!! note
-    This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
-    [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
-
-    For an introduction to the Julia-XAI ecosystem, refer to the 
-    [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
-
-
+    This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
+    For an introduction to the ecosystem, please refer to the 
+    [*Getting started* guide](https://julia-xai.github.io/XAIDocs/).
 
 ## Installation 
 To install this package and its dependencies, open the Julia REPL and run 

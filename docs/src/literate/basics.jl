@@ -1,19 +1,9 @@
 # # [Basic usage of LRP](@id docs-lrp-basics)
-#md # !!! note "Getting started"
-#md # This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
-#md # and builds on the basics shown in the
-#md # [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
 
-#md # !!! note "TLDR"
-#md #
-#md #     1. Use [`strip_softmax`](@ref) to strip the output softmax from your model.
-#md #        Otherwise [model checks](@ref docs-lrp-model-checks) will fail.
-#md #     1. Use [`canonize`](@ref) to fuse linear layers.
-#md #     1. Don't just call `LRP(model)`, instead use a [`Composite`](@ref)
-#md #        to apply LRP rules to your model.
-#md #        Read [*Assigning rules to layers*](@ref docs-composites).
-#md #     1. By default, `LRP` will call [`flatten_model`](@ref) to flatten your model.
-#md #        This reduces computational overhead.
+#md # !!! note
+#md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
+#md #     For an introduction to the ecosystem, please refer to the
+#md #     [*Getting started* guide](https://julia-xai.github.io/XAIDocs/).
 
 # We start out by loading a small convolutional neural network:
 using RelevancePropagation
@@ -34,6 +24,18 @@ model = Chain(
 # This model contains two chains: the convolutional layers and the fully connected layers.
 
 # ## [Model preparation](@id docs-lrp-model-prep)
+
+#md # !!! note "TLDR"
+#md #
+#md #     1. Use [`strip_softmax`](@ref) to strip the output softmax from your model.
+#md #        Otherwise [model checks](@ref docs-lrp-model-checks) will fail.
+#md #     1. Use [`canonize`](@ref) to fuse linear layers.
+#md #     1. Don't just call `LRP(model)`, instead use a [`Composite`](@ref)
+#md #        to apply LRP rules to your model.
+#md #        Read [*Assigning rules to layers*](@ref docs-composites).
+#md #     1. By default, `LRP` will call [`flatten_model`](@ref) to flatten your model.
+#md #        This reduces computational overhead.
+
 # ### [Stripping the output softmax](@id docs-lrp-strip-softmax)
 # When using LRP, it is recommended to explain output logits instead of probabilities.
 # This can be done by stripping the output softmax activation from the model
