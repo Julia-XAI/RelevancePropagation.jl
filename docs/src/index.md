@@ -16,14 +16,14 @@ for use with [Flux.jl](https://fluxml.ai) models.
     [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
 
 
-
 ## Installation 
 To install this package and its dependencies, open the Julia REPL and run 
 ```julia-repl
 julia> ]add RelevancePropagation
 ```
 
-## Manual
+## Index
+### Manual
 ```@contents
 Pages = [
     "generated/basics.md",
@@ -35,7 +35,7 @@ Pages = [
 Depth = 3
 ```
 
-## API reference
+### API reference
 ```@contents
 Pages = ["api.md"]
 Depth = 2
