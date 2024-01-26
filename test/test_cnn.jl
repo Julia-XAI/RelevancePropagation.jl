@@ -66,16 +66,16 @@ end
 @testset "CRP" begin
     composite = EpsilonPlus()
     layer_index = 5 # last Conv layer
-    n_concepts = 2
-    concepts = TopNConcepts(n_concepts)
-    analyzer = CRP(LRP(model, composite), layer_index, concepts)
+    n_features = 2
+    features = TopNFeatures(n_features)
+    analyzer = CRP(LRP(model, composite), layer_index, features)
 
     @testset "Max activation" begin
         println("Timing CRP...")
         print("cold:")
         @time expl = analyze(input, analyzer)
 
-        @test size(expl.val) == size(input) .* (1, 1, 1, n_concepts)
+        @test size(expl.val) == size(input) .* (1, 1, 1, n_features)
         @test_reference "references/cnn/CRP_max.jld2" Dict("expl" => expl.val) by =
             (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
     end
@@ -83,7 +83,7 @@ end
         print("warm:")
         @time expl = analyze(input, analyzer, 1)
 
-        @test size(expl.val) == size(input) .* (1, 1, 1, n_concepts)
+        @test size(expl.val) == size(input) .* (1, 1, 1, n_features)
         @test_reference "references/cnn/CRP_ns1.jld2" Dict("expl" => expl.val) by =
             (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
     end
