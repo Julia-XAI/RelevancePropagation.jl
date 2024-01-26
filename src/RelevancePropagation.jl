@@ -3,6 +3,7 @@ module RelevancePropagation
 using Reexport
 @reexport using XAIBase
 
+using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
 using MacroTools: @forward
 using Flux
@@ -24,6 +25,7 @@ include("composite_presets.jl") # uses show.jl
 include("crp.jl")
 
 export LRP
+export CRP
 
 # LRP rules
 export AbstractLRPRule
@@ -44,9 +46,6 @@ export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
 export EpsilonAlpha2Beta1Flat
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
-
-# CRP
-export CRP, TopNConcepts, IndexedConcepts
 
 # utils
 export strip_softmax, flatten_model, canonize

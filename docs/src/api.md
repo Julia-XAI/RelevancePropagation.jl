@@ -105,8 +105,8 @@ LRP_CONFIG.supports_activation
 # CRP
 ```@docs
 CRP
-TopNConcepts
-IndexedConcepts
+TopNFeatures
+IndexedFeatures
 ```
 
 # Index
