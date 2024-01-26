@@ -105,8 +105,8 @@ LRP_CONFIG.supports_activation
 # CRP
 ```@docs
 CRP
-XAIBase.TopNFeatures
-XAIBase.IndexedFeatures
+TopNFeatures
+IndexedFeatures
 ```
 
 # Index
