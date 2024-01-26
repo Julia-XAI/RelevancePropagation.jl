@@ -17,14 +17,14 @@ convert2image(MNIST, x)
 composite = EpsilonPlusFlat()
 lrp_analyzer = LRP(model, composite)
 
-concept_layer = 3    # index of relevant layer in model
-model[concept_layer] # show layer
+feature_layer = 3    # index of relevant layer in model
+model[feature_layer] # show layer
 
-concepts = TopNConcepts(5)
+features = TopNFeatures(5)
 
-concepts = IndexedConcepts(1, 2, 10)
+features = IndexedFeatures(1, 2, 10)
 
-analyzer = CRP(lrp_analyzer, concept_layer, concepts)
+analyzer = CRP(lrp_analyzer, feature_layer, features)
 heatmap(input, analyzer)
 
 x, y = MNIST(Float32, :test)[10:11]

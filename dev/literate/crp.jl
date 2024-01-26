@@ -32,28 +32,28 @@ lrp_analyzer = LRP(model, composite)
 # ## Step 2: Define concepts
 # Then, specify the index of the layer on the outputs of which you want to condition the explanation.
 # In this example, we are interested in the outputs of the last convolutional layer, layer 3:
-concept_layer = 3    # index of relevant layer in model
-model[concept_layer] # show layer
+feature_layer = 3    # index of relevant layer in model
+model[feature_layer] # show layer
 
-# Then, specify the concepts you are interested in.
-# To automatically select the $n$ most relevant concepts, use [`TopNConcepts`](@ref).
+# Then, specify the concepts / features you are interested in.
+# To automatically select the $n$ most relevant features, use [`TopNFeatures`](@ref).
 #
 # Note that for convolutional layers,
 # a feature corresponds to an entire output channel of the layer.
-concepts = TopNConcepts(5)
+features = TopNFeatures(5)
 
-# To manually specify features, use [`IndexedConcepts`](@ref).
-concepts = IndexedConcepts(1, 2, 10)
+# To manually specify features, use [`IndexedFeatures`](@ref).
+features = IndexedFeatures(1, 2, 10)
 
 # ## Step 3: Use CRP analyzer
 # We can now create a [`CRP`](@ref) analyzer
 # and use it like any other analyzer from RelevancePropagation.jl:
-analyzer = CRP(lrp_analyzer, concept_layer, concepts)
+analyzer = CRP(lrp_analyzer, feature_layer, features)
 heatmap(input, analyzer)
 
 # ## Using CRP on input batches
 # Note that `CRP` uses the batch dimension to return explanations.
-# When using CRP on batches, the explanations are first sorted by concepts, then inputs,
+# When using CRP on batches, the explanations are first sorted by features, then inputs,
 # e.g. `[c1_i1, c1_i2, c2_i1, c2_i2, c3_i1, c3_i2]` in the following example:
 x, y = MNIST(Float32, :test)[10:11]
 batch = reshape(x, 28, 28, 1, :)
