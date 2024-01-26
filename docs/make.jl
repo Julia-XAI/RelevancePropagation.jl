@@ -22,7 +22,7 @@ end
 convert_literate(LITERATE_DIR, OUT_DIR)
 
 makedocs(;
-    modules=[RelevancePropagation],
+    modules=[RelevancePropagation, XAIBase],
     authors="Adrian Hill",
     sitename="RelevancePropagation.jl",
     format=Documenter.HTML(; prettyurls=get(ENV, "CI", "false") == "true", assets=String[]),
