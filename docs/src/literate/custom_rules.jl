@@ -1,4 +1,4 @@
-# # [Custom LRP rules](@id docs-custom-rules)
+# # [Custom LRP Rules](@id docs-custom-rules)
 # One of the design goals of RelevancePropagation.jl is to combine ease of use and
 # extensibility for the purpose of research.
 

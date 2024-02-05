@@ -1,4 +1,4 @@
-# # [Supporting new layers and activation functions](@id docs-custom-layers)
+# # [Supporting New Layers and Activation Functions](@id docs-custom-layers)
 # One of the design goals of RelevancePropagation.jl is to combine ease of use and
 # extensibility for the purpose of research.
 # This example will show you how to extent LRP to new layer types and activation functions.

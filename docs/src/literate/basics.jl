@@ -1,4 +1,4 @@
-# # [Creating an LRP analyzer](@id docs-lrp-basics)
+# # [Creating an LRP Analyzer](@id docs-lrp-basics)
 
 #md # !!! note
 #md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
@@ -116,7 +116,7 @@ heatmap(input, analyzer)
 
 composite = EpsilonPlusFlat() # using composite preset EpsilonPlusFlat
 #-
-analyzer =  LRP(model, composite)
+analyzer = LRP(model, composite)
 #-
 heatmap(input, analyzer)
 

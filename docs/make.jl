@@ -30,14 +30,14 @@ makedocs(;
     pages=[
         "Home"            => "index.md",
         "Basic Usage"     => [
-            "Creating an LRP analyzer"      => "generated/basics.md",
-            "Assigning rules to layers"     => "generated/composites.md",
+            "Creating an LRP Analyzer"      => "generated/basics.md",
+            "Assigning Rules to Layers"     => "generated/composites.md",
             "Concept Relevance Propagation" => "generated/crp.md",
         ],
         "Advanced Usage"  => Any[
-            "Supporting new layer types"    => "generated/custom_layer.md",
-            "Custom LRP rules"              => "generated/custom_rules.md",
-            "Developer documentation"       => "developer.md",
+            "Supporting New Layer Types"    => "generated/custom_layer.md",
+            "Custom LRP Rules"              => "generated/custom_rules.md",
+            "Developer Documentation"       => "developer.md",
         ],
         "API Reference"   => "api.md",
     ],

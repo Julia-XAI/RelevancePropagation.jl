@@ -19,9 +19,8 @@ To install this package and its dependencies, open the Julia REPL and run
 julia> ]add RelevancePropagation
 ```
 
-## Index
-### Manual
-#### Basic Usage
+## Manual
+### Basic Usage
 ```@contents
 Pages = [
     "generated/basics.md",
@@ -30,7 +29,7 @@ Pages = [
 ]
 Depth = 3
 ```
-#### Advanced Usage
+### Advanced Usage
 ```@contents
 Pages = [
     "generated/custom_layer.md",
@@ -40,8 +39,8 @@ Pages = [
 Depth = 3
 ```
 
-### API Reference
+## API Reference
 ```@contents
 Pages = ["api.md"]
-Depth = 4
+Depth = 3
 ```
