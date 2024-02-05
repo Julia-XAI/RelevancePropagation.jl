@@ -29,15 +29,17 @@ makedocs(;
     #! format: off
     pages=[
         "Home"            => "index.md",
-        "Basic usage"     => "generated/basics.md",
-        "Advanced usage"  => Any[
+        "Basic Usage"     => [
+            "Creating an LRP analyzer"      => "generated/basics.md",
             "Assigning rules to layers"     => "generated/composites.md",
+            "Concept Relevance Propagation" => "generated/crp.md",
+        ],
+        "Advanced Usage"  => Any[
             "Supporting new layer types"    => "generated/custom_layer.md",
             "Custom LRP rules"              => "generated/custom_rules.md",
-            "Concept Relevance Propagation" => "generated/crp.md",
             "Developer documentation"       => "developer.md",
         ],
-        "API reference"   => "api.md",
+        "API Reference"   => "api.md",
     ],
     #! format: on
     linkcheck=true,

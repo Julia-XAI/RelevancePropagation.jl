@@ -21,10 +21,18 @@ julia> ]add RelevancePropagation
 
 ## Index
 ### Manual
+#### Basic Usage
 ```@contents
 Pages = [
     "generated/basics.md",
     "generated/composites.md",
+    "generated/crp.md",
+]
+Depth = 3
+```
+#### Advanced Usage
+```@contents
+Pages = [
     "generated/custom_layer.md",
     "generated/custom_rules.md",
     "developer.md",
@@ -32,8 +40,8 @@ Pages = [
 Depth = 3
 ```
 
-### API reference
+### API Reference
 ```@contents
 Pages = ["api.md"]
-Depth = 2
+Depth = 4
 ```
