@@ -1,4 +1,4 @@
-# # [Basic usage of LRP](@id docs-lrp-basics)
+# # [Creating an LRP analyzer](@id docs-lrp-basics)
 
 #md # !!! note
 #md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
@@ -32,7 +32,7 @@ model = Chain(
 #md #     1. Use [`canonize`](@ref) to fuse linear layers.
 #md #     1. Don't just call `LRP(model)`, instead use a [`Composite`](@ref)
 #md #        to apply LRP rules to your model.
-#md #        Read [*Assigning rules to layers*](@ref docs-composites).
+#md #        Read [*Assigning rules to layers*](@ref docs-composites) for more information.
 #md #     1. By default, `LRP` will call [`flatten_model`](@ref) to flatten your model.
 #md #        This reduces computational overhead.
 
@@ -81,11 +81,28 @@ analyzer.model
 # by passing the keyword argument `flatten=false` to the `LRP` constructor.
 
 # ## LRP rules
-# By default, the `LRP` constructor will assign the [`ZeroRule`](@ref) to all layers.
-LRP(model)
+# The following examples will be run on a pre-trained LeNet-5 model:
+using BSON
 
-# This analyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
-# from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
+model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
+
+# We also load the MNIST dataset:
+using MLDatasets
+using ImageCore, ImageIO, ImageShow
+
+index = 10
+x, y = MNIST(Float32, :test)[10]
+input = reshape(x, 28, 28, 1, :)
+
+convert2image(MNIST, x)
+
+# By default, the `LRP` constructor will assign the [`ZeroRule`](@ref) to all layers.
+analyzer = LRP(model)
+
+# This ana lyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
+# from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl):
+
+heatmap(input, analyzer)
 
 # LRP's strength lies in assigning different rules to different layers,
 # based on their functionality in the neural network[^1].
@@ -99,7 +116,9 @@ LRP(model)
 
 composite = EpsilonPlusFlat() # using composite preset EpsilonPlusFlat
 #-
-LRP(model, composite)
+analyzer =  LRP(model, composite)
+#-
+heatmap(input, analyzer)
 
 # ## [Computing layerwise relevances](@id docs-lrp-layerwise)
 # If you are interested in computing layerwise relevances,
@@ -108,18 +127,12 @@ LRP(model, composite)
 #
 # The layerwise relevances can be accessed in the `extras` field
 # of the returned `Explanation`:
-input = rand(Float32, 32, 32, 3, 1) # dummy input for our convolutional neural network
 
 expl = analyze(input, analyzer; layerwise_relevances=true)
 expl.extras.layerwise_relevances
 
 # Note that the layerwise relevances are only kept for layers in the outermost `Chain` of the model.
-# When using our unflattened model, we only obtain three layerwise relevances,
-# one for each chain in the model and the output relevance:
-analyzer = LRP(model; flatten=false) # use unflattened model
-
-expl = analyze(input, analyzer; layerwise_relevances=true)
-expl.extras.layerwise_relevances
+# Since we used a flattened model, we obtained all relevances.
 
 # ## [Performance tips](@id docs-lrp-performance)
 # ### [Using LRP with a GPU](@id gpu-docs)
@@ -132,7 +145,7 @@ expl.extras.layerwise_relevances
 # ```julia
 # using CUDA, cuDNN
 # using Flux
-# using ExplainableAI
+# using RelevancePropagation
 #
 # # move input array and model weights to GPU
 # input = input |> gpu # or gpu(input)
