@@ -1,4 +1,4 @@
-# [LRP developer documentation](@id lrp-dev-docs)
+# [Developer Documentation](@id lrp-dev-docs)
 ## Generic LRP rule implementation
 Before we dive into package-specific implementation details 
 in later sections of this developer documentation, 
