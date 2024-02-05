@@ -2,8 +2,7 @@ using RelevancePropagation
 using Flux
 
 using BSON # hide
-model = BSON.load("../model.bson", @__MODULE__)[:model] # hide
-model
+model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
 
 using MLDatasets
 using ImageCore, ImageIO, ImageShow

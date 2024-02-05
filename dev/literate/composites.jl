@@ -1,4 +1,4 @@
-# # [Assigning LRP rules to layers](@id docs-composites)
+# # [Assigning LRP Rules to Layers](@id docs-composites)
 # In this example, we will show how to assign LRP rules to specific layers.
 # For this purpose, we first define a small VGG-like convolutional neural network:
 using RelevancePropagation

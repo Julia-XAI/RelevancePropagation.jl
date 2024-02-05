@@ -1,15 +1,14 @@
-# # [Custom LRP rules](@id docs-custom-rules)
+# # [Custom LRP Rules](@id docs-custom-rules)
 # One of the design goals of RelevancePropagation.jl is to combine ease of use and
 # extensibility for the purpose of research.
 
 # This example will show you how to implement custom LRP rules.
 
-#md # !!! note "Getting started"
-#md # This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
-#md # and builds on the basics shown in the
-#md # [*Getting started* guide from ExplainableAI.jl](https://julia-xai.github.io/ExplainableAI.jl/stable/generated/example/).
+#md # !!! note
+#md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
+#md #     and builds on the basics shown in the [*Getting started* guide](https://julia-xai.github.io/XAIDocs/).
 
-# We start out by loading the same pre-trained LeNet5 model and MNIST input data:
+# We start out by loading the same pre-trained LeNet-5 model and MNIST input data:
 using RelevancePropagation
 using Flux
 using MLDatasets
@@ -20,8 +19,7 @@ index = 10
 x, y = MNIST(Float32, :test)[10]
 input = reshape(x, 28, 28, 1, :)
 
-model = BSON.load("../model.bson", @__MODULE__)[:model] # hide
-model
+model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
 
 # ## Implementing a custom rule
 # ### Step 1: Define rule struct

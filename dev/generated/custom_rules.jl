@@ -8,8 +8,7 @@ index = 10
 x, y = MNIST(Float32, :test)[10]
 input = reshape(x, 28, 28, 1, :)
 
-model = BSON.load("../model.bson", @__MODULE__)[:model] # hide
-model
+model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
 
 struct MyGammaRule <: AbstractLRPRule end
 

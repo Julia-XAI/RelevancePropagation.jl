@@ -23,18 +23,28 @@ model_flat = flatten_model(model)
 analyzer = LRP(model)
 analyzer.model
 
-LRP(model)
+using BSON
+
+model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
+
+using MLDatasets
+using ImageCore, ImageIO, ImageShow
+
+index = 10
+x, y = MNIST(Float32, :test)[10]
+input = reshape(x, 28, 28, 1, :)
+
+convert2image(MNIST, x)
+
+analyzer = LRP(model)
+
+heatmap(input, analyzer)
 
 composite = EpsilonPlusFlat() # using composite preset EpsilonPlusFlat
 
-LRP(model, composite)
+analyzer = LRP(model, composite)
 
-input = rand(Float32, 32, 32, 3, 1) # dummy input for our convolutional neural network
-
-expl = analyze(input, analyzer; layerwise_relevances=true)
-expl.extras.layerwise_relevances
-
-analyzer = LRP(model; flatten=false) # use unflattened model
+heatmap(input, analyzer)
 
 expl = analyze(input, analyzer; layerwise_relevances=true)
 expl.extras.layerwise_relevances
