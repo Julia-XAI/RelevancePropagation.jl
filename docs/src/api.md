@@ -1,9 +1,25 @@
-# LRP analyzer
+# API Reference
+## Basic API
+All methods in RelevancePropagation.jl work by calling `analyze` on an input and an analyzer:
+```@docs
+analyze
+Explanation
+heatmap
+```
+
+## LRP analyzer
 ```@docs
 LRP
 ```
 
-# [LRP rules](@id api-lrp-rules)
+### Model preparation
+```@docs
+strip_softmax
+canonize
+flatten_model
+```
+
+## [LRP rules](@id api-lrp-rules)
 ```@docs
 ZeroRule
 EpsilonRule
@@ -17,29 +33,15 @@ PassRule
 GeneralizedGammaRule
 ```
 
-For [manual rule assignment](@ref docs-composites-manual), 
-use `ChainTuple` and `ParallelTuple`, matching the model structure:
-```@docs
-ChainTuple
-ParallelTuple
-```
-
-# Model preparation
-```@docs
-strip_softmax
-canonize
-flatten_model
-```
-
-# Composites
-## Applying composites
+## Composites
+### Applying composites
 ```@docs
 Composite
 lrp_rules
 ```
 
-## [Composite primitives](@id api-composite-primitives)
-### Mapping layers to rules
+### [Composite primitives](@id api-composite-primitives)
+#### Mapping layers to rules
 Composite primitives that apply a single rule:
 ```@docs
 LayerMap
@@ -55,7 +57,7 @@ make use of `show_layer_indices`:
 show_layer_indices
 ```
 
-### Mapping layers to rules based on type
+#### Mapping layers to rules based on type
 Composite primitives that apply rules based on the layer type:
 ```@docs
 GlobalTypeMap
@@ -65,7 +67,7 @@ LastLayerTypeMap
 FirstNTypeMap
 ```
 
-### Union types for composites
+#### Union types for composites
 The following exported union types types can be used to define TypeMaps:
 ```@docs
 ConvLayer
@@ -75,7 +77,7 @@ ReshapingLayer
 NormalizationLayer
 ```
 
-## [Composite presets](@id api-composite-presets)
+### [Composite presets](@id api-composite-presets)
 ```@docs
 EpsilonGammaBox
 EpsilonPlus
@@ -84,7 +86,15 @@ EpsilonPlusFlat
 EpsilonAlpha2Beta1Flat
 ```
 
-# Custom rules 
+### Manual rule assignment
+For [manual rule assignment](@ref docs-composites-manual), 
+use `ChainTuple` and `ParallelTuple`, matching the model structure:
+```@docs
+ChainTuple
+ParallelTuple
+```
+
+## Custom rules 
 These utilities can be used to define custom rules without writing boilerplate code.
 To extend these functions, explicitly `import` them: 
 ```@docs
@@ -102,7 +112,7 @@ LRP_CONFIG.supports_layer
 LRP_CONFIG.supports_activation
 ```
 
-# CRP
+## CRP
 ```@docs
 CRP
 TopNFeatures
