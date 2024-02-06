@@ -1,15 +1,29 @@
 using Flux
 using Flux: flatten
-using RelevancePropagation: flatten_model
-using RelevancePropagation: has_output_softmax, check_output_softmax, activation_fn
+using RelevancePropagation: activation_fn, copy_layer, flatten_model
+using RelevancePropagation: has_output_softmax, check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 using Random
 
 # Test `activation_fn`
 @test activation_fn(Dense(5, 2, gelu)) == gelu
-@test activation_fn(Conv((5, 5), 3 => 2, softplus)) == softplus
-@test activation_fn(BatchNorm(5, selu)) == selu
+for T in (BatchNorm, LayerNorm, InstanceNorm)
+    @test activation_fn(T(5, selu)) == selu
+end
+@test activation_fn(GroupNorm(4, 2, selu)) == selu
+for T in (Conv, ConvTranspose, CrossCor)
+    @test activation_fn(T((5, 5), 3 => 2, softplus)) == softplus
+end
 @test isnothing(activation_fn(flatten))
+
+# copy_layer
+for T in (Conv, ConvTranspose, CrossCor)
+    l1 = T((3, 3), 3 => 2, relu)
+    l2 = copy_layer(l1, 2 * l1.weight, 0.1 * l1.bias; σ=gelu)
+    @test l2.weight ≈ 2 * l1.weight
+    @test l2.bias ≈ 0.1 * l1.bias
+    @test activation_fn(l2) == gelu
+end
 
 # flatten_model
 @test flatten_model(Chain(Chain(Chain(abs)), sqrt, Chain(relu))) == Chain(abs, sqrt, relu)
