@@ -11,15 +11,15 @@ using Zygote
 using Markdown
 
 include("bibliography.jl")
-include("flux_types.jl")
-include("flux_layer_utils.jl")
-include("flux_chain_utils.jl")
+include("layer_types.jl")
+include("layer_utils.jl")
+include("chain_utils.jl")
 include("utils.jl")
 include("canonize.jl")
 include("checks.jl")
 include("rules.jl")
 include("composite.jl")
-include("analyzer.jl")
+include("lrp.jl")
 include("show.jl")
 include("composite_presets.jl") # uses show.jl
 include("crp.jl")
