@@ -53,6 +53,5 @@ h4p1 = d4(2 * h21 + h331) # output of Chain c6
     (1,), ParallelTuple((2, 1), (2, 2), ChainTuple((2, 3, 1), (2, 3, 2))), (3,)
 )
 @test chainindices(c8) == ChainTuple((1,), SkipConnectionTuple((2, 1)))
-@test chainindices(c9) == ChainTuple(
-    (1,), SkipConnectionTuple(ChainTuple((2, 1, 1), (2, 1, 2))), (3,)
-)
+@test chainindices(c9) ==
+    ChainTuple((1,), SkipConnectionTuple(ChainTuple((2, 1, 1), (2, 1, 2))), (3,))

@@ -1,7 +1,6 @@
 using RelevancePropagation
 using RelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
-using RelevancePropagation:
-    modify_parameters, modify_weight, modify_bias, modify_layer
+using RelevancePropagation: modify_parameters, modify_weight, modify_bias, modify_layer
 using RelevancePropagation: stabilize_denom
 using Flux
 using LinearAlgebra: I
