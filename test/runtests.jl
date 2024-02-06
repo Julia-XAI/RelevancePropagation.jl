@@ -19,7 +19,7 @@ pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
     end
     @testset "Flux utilities" begin
         @info "Testing chainmap..."
-        include("test_chainmap.jl")
+        include("test_chain_utils.jl")
     end
     @testset "Canonize" begin
         @info "Testing model canonization..."
