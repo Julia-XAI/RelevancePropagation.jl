@@ -12,14 +12,14 @@ Base.show(io::IO, idx::ModelIndex) = Base.show(io, idx.inds)
 
 Base.:(==)(a::ModelIndex, b::ModelIndex) = a.inds == b.inds
 @forward ModelIndex.inds Base.getindex,
-    Base.length,
-    Base.first,
-    Base.last,
-    Base.iterate,
-    Base.lastindex,
-    Base.keys,
-    Base.firstindex,
-    Base.similar
+Base.length,
+Base.first,
+Base.last,
+Base.iterate,
+Base.lastindex,
+Base.keys,
+Base.firstindex,
+Base.similar
 
 # in(ModelIndex(1, 2),    ModelIndex(1))       -> true
 # in(ModelIndex(1, 2),    ModelIndex(2))       -> false
@@ -71,8 +71,6 @@ function chainindices(x, idx::ModelIndex)
         return T(chainindices.(children(x), idxs)...)
     end
 end
-
-
 
 """
     show_layer_indices(model)
