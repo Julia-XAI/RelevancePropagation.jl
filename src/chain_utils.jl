@@ -205,7 +205,7 @@ _chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
 
 chainflatten(s::SkipConnection)       = _chainflatten(s)
 chainflatten(s::SkipConnectionTuple)  = _chainflatten(s)
-_chainflatten(s::SkipConnection)      = SkipConnection(s.connection, chainflatten(s.layers))
+_chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
 _chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
 
 chainflatten(x) = x

@@ -131,16 +131,19 @@ function lrp!(
     # Compute contributions of layer and skip connection to output activation.
     # For the skip connection, activations stay constant: aᵏ⁺¹_skip = aᵏ_skip = aᵏ
     aᵏ⁺¹_layers = sc.layers(aᵏ)
-    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # aᵏ = aᵏ⁺¹_skip
+    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # using aᵏ = aᵏ⁺¹_skip
 
     # Distribute relevance accoring to contribution to output activation
     # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
     Rᵏ⁺¹_layers = c .* aᵏ⁺¹_layers
-    Rᵏ_skip = c .* aᵏ⁺¹_skip  # Rᵏ_skip = Rᵏ⁺¹_skip
+    Rᵏ_skip = c .* aᵏ  # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip
 
     # Compute input relevance Rᵏ of layers
     Rᵏ_layers = similar(Rᵏ_skip) # pre-allocate output
-    lrp!(Rᵏ_layers, rules, sc.layers, modified_sc.layers, aᵏ, Rᵏ⁺¹_layers)
+    rules = ChainTuple(rules.vals)
+    chain = Chain(sc.layers)
+    modified_chain = ChainTuple(modified_sc.vals)
+    lrp!(Rᵏ_layers, rules, chain, modified_chain, aᵏ, Rᵏ⁺¹_layers)
 
     # Sum up input relevances
     return Rᵏ .= Rᵏ_layers .+ Rᵏ_skip
