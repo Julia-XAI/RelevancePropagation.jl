@@ -14,7 +14,7 @@ typename(x) = string(nameof(typeof(x)))
 
 layer_name(io::IO, l) = string(sprint(show, l; context=io))
 
-function get_name_padding(names::Union{ChainTuple,ParallelTuple})
+function get_name_padding(names::Union{ChainTuple,ParallelTuple,SkipConnectionTuple})
     children = filter(isleaf, names.vals)
     isempty(children) && return 0
     return maximum(length.(children))
@@ -30,7 +30,7 @@ function Base.show(io::IO, m::MIME"text/plain", lrp::LRP)
     print(io, ")")
 end
 
-for T in (:ChainTuple, :ParallelTuple)
+for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
     tuple_name = string(T)
     @eval begin
         function print_rule(io::IO, names::$T, rules::$T, indent::Int=0, npad::Int=0)

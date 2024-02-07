@@ -1,4 +1,5 @@
-## Layer types
+"""Union type for dataflow layers."""
+const DataflowLayer = Union{Chain,Parallel,SkipConnection}
 
 """Union type for convolutional layers."""
 const ConvLayer = Union{Conv,ConvTranspose,CrossCor}
@@ -36,8 +37,7 @@ const LRPSupportedActivation = Union{typeof(identity),ReluLikeActivation}
 This includes the usage of allowed activation functions as layers.
 """
 const LRPSupportedLayer = Union{
-    Chain,
-    Parallel,
+    DataflowLayer,
     Dense,
     ConvLayer,
     DropoutLayer,

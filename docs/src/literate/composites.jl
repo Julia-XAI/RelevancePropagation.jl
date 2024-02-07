@@ -42,8 +42,9 @@ rules = [
 LRP(model_flat, rules)
 
 # However, this approach only works for models that can be fully flattened.
-# For unflattened models and models containing `Parallel` layers, we can compose rules using
-# [`ChainTuple`](@ref)s and [`ParallelTuple`](@ref)s which match the model structure:
+# For unflattened models and models containing `Parallel` and `SkipConnection` layers,
+# we can compose rules using [`ChainTuple`](@ref), [`ParallelTuple`](@ref)
+# and [`SkipConnectionTuple`](@ref)s which match the model structure:
 rules = ChainTuple(
     ChainTuple(FlatRule(), ZPlusRule(), ZeroRule(), ZPlusRule(), ZPlusRule(), ZeroRule()),
     ChainTuple(PassRule(), EpsilonRule(), PassRule(), EpsilonRule()),

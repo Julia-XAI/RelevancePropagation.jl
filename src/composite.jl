@@ -168,40 +168,6 @@ function get_type_rule(layer, map)
 end
 
 """
-    in_branch(a, b)
-
-Viewing index tuples `a` and `b` as positions on a tree-like data structure,
-this checks whether `a` is on the same "branch" as `b`.
-
-## Examples
-```julia-repl
-julia> in_branch((1, 2), 1)
-true
-
-julia> in_branch((1, 2), 2)
-false
-
-julia> in_branch((1, 2), (1, 2))
-true
-
-julia> in_branch((1, 2, 3), (1, 2))
-true
-
-julia> in_branch((1, 2), (1, 2, 3))
-false
-```
-"""
-in_branch(a::Integer, b::Integer) = a == b
-in_branch(a::Tuple, b::Integer) = first(a) == b
-function in_branch(a::Tuple, b::Tuple)
-    length(a) < length(b) && return false
-    for i in eachindex(b)
-        a[i] != b[i] && return false
-    end
-    return true
-end
-
-"""
     lrp_rules(model, composite)
 
 Apply a composite to obtain LRP-rules for a given Flux model.
@@ -211,7 +177,7 @@ function lrp_rules(model, c::Composite)
     idx_first = first_element(indices)
     idx_last = last_element(indices)
 
-    get_rule(r::LayerMap, _, idx) = ifelse(in_branch(idx, r.index), r.rule, nothing)
+    get_rule(r::LayerMap, _, idx) = ifelse(idx ∈ ModelIndex(r.index), r.rule, nothing)
     get_rule(r::GlobalMap, _, _idx) = r.rule
     get_rule(r::RangeMap, _, idx) = ifelse(first(idx) ∈ r.range, r.rule, nothing)
     get_rule(r::FirstLayerMap, _, idx) = ifelse(idx == idx_first, r.rule, nothing)

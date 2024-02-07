@@ -87,11 +87,12 @@ EpsilonAlpha2Beta1Flat
 ```
 
 ### Manual rule assignment
-For [manual rule assignment](@ref docs-composites-manual), 
-use `ChainTuple` and `ParallelTuple`, matching the model structure:
+For [manual rule assignment](@ref docs-composites-manual), use `ChainTuple`, 
+`ParallelTuple` and `SkipConnectionTuple`, matching the model structure:
 ```@docs
 ChainTuple
 ParallelTuple
+SkipConnectionTuple
 ```
 
 ## Custom rules 

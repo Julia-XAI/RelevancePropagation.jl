@@ -2,17 +2,16 @@
 # ChainTuple & ParallelTuple #
 #============================#
 
-# To support map and zip on Flux Chains containing both `Chain` and `Parallel` layers,
+# To support map and zip on Flux Chains containing `Chain`, `Parallel` and `SkipConnection` layers,
 # we need a flexible, general purpose container, e.g. a Tuple.
-# We opt to introduce `ChainTuple` and `ParallelTuple` instead of `Chain` and `Parallel`
-# to avoid type piracy.
+# We opt to introduce `ChainTuple`,` `ParallelTuple` and `SkipConnectionTuple` to avoid type piracy.
 
 """
     ChainTuple(xs)
 
 Thin wrapper around `Tuple` for use with Flux.jl models.
 
-Combining [`ChainTuple`](@ref) and [`ParallelTuple`](@ref),
+Combining [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref),
 data `xs` can be stored while preserving the structure of a Flux model
 without risking type piracy.
 """
@@ -25,7 +24,7 @@ end
 
 Thin wrapper around `Tuple` for use with Flux.jl models.
 
-Combining [`ChainTuple`](@ref) and [`ParallelTuple`](@ref),
+Combining [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref),
 data `xs` can be stored while preserving the structure of a Flux model
 without risking type piracy.
 """
@@ -33,7 +32,20 @@ struct ParallelTuple{T<:Tuple}
     vals::T
 end
 
-for T in (:ChainTuple, :ParallelTuple)
+"""
+    SkipConnectionTuple(xs)
+
+Thin wrapper around `Tuple` for use with Flux.jl models.
+
+Combining [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref),
+data `xs` can be stored while preserving the structure of a Flux model
+without risking type piracy.
+"""
+struct SkipConnectionTuple{T<:Tuple}
+    vals::T
+end
+
+for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
     name = string(T)
 
     @eval begin
@@ -74,21 +86,27 @@ print_vals(io::IO, x, indent::Int=0) = println(io, " "^indent, x, ",")
 # The following implementation of map and zip on Chains and Parallel layers
 # are strongly inspired by StructWalk.jl's postwalk function.
 
-isleaf(c::Chain)         = false
-isleaf(p::Parallel)      = false
-isleaf(c::ChainTuple)    = false
-isleaf(p::ParallelTuple) = false
-isleaf(x)                = true
+isleaf(c::Chain)               = false
+isleaf(c::ChainTuple)          = false
+isleaf(p::Parallel)            = false
+isleaf(p::ParallelTuple)       = false
+isleaf(s::SkipConnection)      = false
+isleaf(s::SkipConnectionTuple) = false
+isleaf(x)                      = true
 
-constructor(::Chain)         = ChainTuple
-constructor(::ChainTuple)    = ChainTuple
-constructor(::Parallel)      = ParallelTuple
-constructor(::ParallelTuple) = ParallelTuple
+constructor(::Chain)               = ChainTuple
+constructor(::ChainTuple)          = ChainTuple
+constructor(::Parallel)            = ParallelTuple
+constructor(::ParallelTuple)       = ParallelTuple
+constructor(::SkipConnection)      = SkipConnectionTuple
+constructor(::SkipConnectionTuple) = SkipConnectionTuple
 
-children(c::Chain)         = c.layers
-children(p::Parallel)      = p.layers
-children(c::ChainTuple)    = c.vals
-children(p::ParallelTuple) = p.vals
+children(c::Chain)               = c.layers
+children(p::Parallel)            = p.layers
+children(s::SkipConnection)      = (s.layers,)
+children(c::ChainTuple)          = c.vals
+children(p::ParallelTuple)       = p.vals
+children(s::SkipConnectionTuple) = s.vals
 
 """
     chainmap(f, x)
@@ -121,51 +139,6 @@ function chainall(f, x)
     isleaf(x) && return f(x)
     return all(chainall.(f, children(x)))
 end
-
-"""
-:q
-Sequentially enumerate all layers in a Flux model.
-Nested `Chain` and `Parallel` layers will result in tuples of indices.
-
-# Example:
-```julia-repl
-julia> d = Dense(2, 2);
-
-julia> model = Chain(d, Parallel(+, d, d, Chain(d, d)), d);
-
-julia> chainindices(model)
-ChainTuple(
-  (1,),
-  ParallelTuple(
-    (2, 1),
-    (2, 2),
-    ChainTuple(
-      (2, 3, 1),
-      (2, 3, 2),
-    ),
-  ),
-  (3,),
-)
-```
-"""
-chainindices(model) = chainindices(model, tuple())
-function chainindices(x, key)
-    if isleaf(x)
-        return key
-    else
-        T = constructor(x)
-        keys = map(i -> (key..., i), 1:length(children(x)))
-        return T(chainindices.(children(x), keys)...)
-    end
-end
-
-"""
-    show_layer_indices(model)
-
-Print layer indices of Flux models.
-This is primarily a utility to help define [`LayerMap`](@ref) primitives.
-"""
-show_layer_indices(model) = chainindices(model)
 
 """
     chainzip(f, x, y)
@@ -230,6 +203,11 @@ chainflatten(p::ParallelTuple)  = _chainflatten(p)
 _chainflatten(p::Parallel)      = Parallel(p.connection, chainflatten.(p.layers))
 _chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
 
+chainflatten(s::SkipConnection)       = _chainflatten(s)
+chainflatten(s::SkipConnectionTuple)  = _chainflatten(s)
+_chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
+_chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
+
 chainflatten(x) = x
 _chainflatten(x) = x
 
@@ -289,5 +267,6 @@ function strip_softmax(model::Chain)
     end
     _strip_softmax(c::Chain) = Chain(_strip_softmax.(c.layers)...)
     _strip_softmax(p::Parallel) = p # p.connection can't be softmax
+    _strip_softmax(p::SkipConnection) = p # p.connection can't be softmax
     return _strip_softmax(model)
 end

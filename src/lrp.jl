@@ -100,19 +100,51 @@ end
 function lrp!(
     Rᵏ, rules::ParallelTuple, parallel::Parallel, modified_parallel::ParallelTuple, aᵏ, Rᵏ⁺¹
 )
-    # We re-distribute the relevance Rᵏ⁺¹ to the i-th "branch" of the parallel layer
+    # Re-compute contributions of parallel branches to output activation
+    aᵏ⁺¹s = [layer(aᵏ) for layer in parallel.layers]
+
+    # Distribute the relevance Rᵏ⁺¹ to the i-th branch of the parallel layer
     # according to the contribution aᵏ⁺¹ᵢ of branch i to the output activation aᵏ⁺¹:
-    #   Rᵏ⁺¹ᵢ = Rᵏ⁺¹ .* aᵏ⁺¹ᵢ ./ aᵏ⁺¹ = c .* aᵏ⁺¹ᵢ
+    #   Rᵏ⁺¹s[i] = Rᵏ⁺¹ .* aᵏ⁺¹s[i] ./ aᵏ⁺¹ = c .* aᵏ⁺¹s[i]
+    c = Rᵏ⁺¹ ./ stabilize_denom(sum(aᵏ⁺¹s))
+    Rᵏ⁺¹s = [c .* aᵏ⁺¹ for aᵏ⁺¹ in aᵏ⁺¹s]
 
-    aᵏ⁺¹_parallel = [layer(aᵏ) for layer in parallel.layers] # aᵏ⁺¹ᵢ for each branch i
-    c = Rᵏ⁺¹ ./ stabilize_denom(sum(aᵏ⁺¹_parallel))
-    Rᵏ⁺¹_parallel = [c .* a for a in aᵏ⁺¹_parallel]          # Rᵏ⁺¹ᵢ for each branch i
-    Rᵏ_parallel = [similar(aᵏ) for _ in parallel.layers]     # pre-allocate output Rᵏᵢ for each branch
-
-    for (Rᵏᵢ, rule, layer, modified_layer, Rᵏ⁺¹ᵢ) in
-        zip(Rᵏ_parallel, rules, parallel.layers, modified_parallel, Rᵏ⁺¹_parallel)
-        # In-place update Rᵏᵢ and therefore Rᵏ_parallel
-        lrp!(Rᵏᵢ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹ᵢ)
+    # Compute individual input relevances Rᵏ for all branches of the parallel layer
+    Rᵏs = [similar(aᵏ) for _ in parallel.layers]  # pre-allocate output
+    for (Rᵏ, rule, layer, modified_layer, Rᵏ⁺¹) in
+        zip(Rᵏs, rules, parallel.layers, modified_parallel, Rᵏ⁺¹s)
+        # In-place update Rᵏᵢ and therefore Rᵏs
+        lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     end
-    return Rᵏ .= sum(Rᵏ_parallel)
+    # Sum up individual input relevances
+    return Rᵏ .= sum(Rᵏs)
+end
+
+function lrp!(
+    Rᵏ,
+    rules::SkipConnectionTuple,
+    sc::SkipConnection,
+    modified_sc::SkipConnectionTuple,
+    aᵏ,
+    Rᵏ⁺¹,
+)
+    # Compute contributions of layer and skip connection to output activation.
+    # For the skip connection, activations stay constant: aᵏ⁺¹_skip = aᵏ_skip = aᵏ
+    aᵏ⁺¹_layers = sc.layers(aᵏ)
+    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # using aᵏ = aᵏ⁺¹_skip
+
+    # Distribute relevance accoring to contribution to output activation
+    # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
+    Rᵏ⁺¹_layers = c .* aᵏ⁺¹_layers
+    Rᵏ_skip = c .* aᵏ  # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip
+
+    # Compute input relevance Rᵏ of layers
+    Rᵏ_layers = similar(Rᵏ_skip) # pre-allocate output
+    rules = ChainTuple(rules.vals)
+    chain = Chain(sc.layers)
+    modified_chain = ChainTuple(modified_sc.vals)
+    lrp!(Rᵏ_layers, rules, chain, modified_chain, aᵏ, Rᵏ⁺¹_layers)
+
+    # Sum up input relevances
+    return Rᵏ .= Rᵏ_layers .+ Rᵏ_skip
 end

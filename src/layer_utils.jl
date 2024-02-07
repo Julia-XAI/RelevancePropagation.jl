@@ -10,6 +10,9 @@ activation_fn(l::Conv)          = l.σ
 activation_fn(l::CrossCor)      = l.σ
 activation_fn(l::ConvTranspose) = l.σ
 activation_fn(l::BatchNorm)     = l.λ
+activation_fn(l::LayerNorm)     = l.λ
+activation_fn(l::InstanceNorm)  = l.λ
+activation_fn(l::GroupNorm)     = l.λ
 
 has_weight(layer) = hasproperty(layer, :weight)
 has_bias(layer) = hasproperty(layer, :bias)
@@ -22,10 +25,14 @@ Copy layer using weights `W` and `b`. The activation function `σ` can also be s
 defaulting to `identity`.
 """
 copy_layer(::Dense, W, b; σ=identity) = Dense(W, b, σ)
-copy_layer(l::Conv, W, b; σ=identity) = Conv(σ, W, b, l.stride, l.pad, l.dilation, l.groups)
+function copy_layer(l::Conv, W, b; σ=identity)
+    return Conv(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation, groups=l.groups)
+end
 function copy_layer(l::ConvTranspose, W, b; σ=identity)
-    return ConvTranspose(σ, W, b, l.stride, l.pad, l.dilation, l.groups)
+    return ConvTranspose(
+        W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation, groups=l.groups
+    )
 end
 function copy_layer(l::CrossCor, W, b; σ=identity)
-    return CrossCor(σ, W, b, l.stride, l.pad, l.dilation)
+    return CrossCor(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation)
 end

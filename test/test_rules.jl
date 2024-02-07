@@ -1,7 +1,6 @@
 using RelevancePropagation
 using RelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
-using RelevancePropagation:
-    modify_parameters, modify_weight, modify_bias, modify_layer
+using RelevancePropagation: modify_parameters, modify_weight, modify_bias, modify_layer
 using RelevancePropagation: stabilize_denom
 using Flux
 using LinearAlgebra: I
@@ -60,15 +59,19 @@ const RULES = Dict(
     @test R̂ᵏ ≈ Rᵏ
 end
 
-@testset "Parallel analytic" begin
+@testset "Parallel and SkipConnection analytic" begin
     W = [3.0 4.0; 5.0 6.0]
     b = [7.0, 8.0]
-    model = Chain(Parallel(+, identity, Dense(W, b, relu)))
+    aᵏ = reshape([1.0 2.0], 2, 1)
     composite = Composite(
         GlobalTypeMap(typeof(identity) => PassRule(), Dense => ZeroRule())
     )
 
-    aᵏ = reshape([1.0 2.0], 2, 1)
+    model_p = Chain(Parallel(+, identity, Dense(W, b, relu)))
+    model_s = Chain(SkipConnection(Dense(W, b, relu), +))
+    analyzer_p = LRP(model_p, composite)
+    analyzer_s = LRP(model_s, composite)
+
     # aᵏ⁺¹₁ = identity(aᵏ) = [1 2]
     # aᵏ⁺¹₂ = Dense(aᵏ) = [3*1 + 4*2 + 7,  5*1 + 6*2 + 8] = [18 25]
     # aᵏ⁺¹ = [19 27]
@@ -85,8 +88,10 @@ end
     # [Rᵏ₂]₂ = 4*2/18*(18/19) + 6*2/25*0 = 8/19
     # Rᵏ₂ = [3/19 8/19]
     # Rᵏ = Rᵏ₁ + Rᵏ₂ = [4/19 8/19]
-    e1 = analyze(aᵏ, LRP(model, composite), 1)
-    @test e1.val ≈ reshape([4 / 19 8 / 19], 2, 1)
+    e1_p = analyze(aᵏ, analyzer_p, 1)
+    e1_s = analyze(aᵏ, analyzer_s, 1)
+    @test e1_p.val ≈ reshape([4 / 19 8 / 19], 2, 1)
+    @test e1_s.val ≈ reshape([4 / 19 8 / 19], 2, 1)
 
     # Analogous for output neuron 2:
     # Rᵏ⁺¹ = [0 1]
@@ -100,8 +105,10 @@ end
     # [Rᵏ₂]₂ = 4*2/18*0 + 6*2/25*(25/27) = 12/27
     # Rᵏ₂ = [5/27 12/27]
     # Rᵏ = Rᵏ₁ + Rᵏ₂ = [5/27 14/27]
-    e2 = analyze(aᵏ, LRP(model, composite), 2)
-    @test e2.val ≈ reshape([5 / 27 14 / 27], 2, 1)
+    e2_p = analyze(aᵏ, analyzer_p, 2)
+    e2_s = analyze(aᵏ, analyzer_s, 2)
+    @test e2_p.val ≈ reshape([5 / 27 14 / 27], 2, 1)
+    @test e2_s.val ≈ reshape([5 / 27 14 / 27], 2, 1)
 end
 
 @testset "AlphaBetaRule analytic" begin

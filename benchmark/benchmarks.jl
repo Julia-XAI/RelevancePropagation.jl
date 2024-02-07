@@ -28,10 +28,7 @@ model = Chain(
 Flux.testmode!(model, true)
 
 # Use one representative algorithm of each type
-algs = Dict(
-    "LRP"                 => LRP,
-    "LREpsilonPlusFlat"   => model -> LRP(model, EpsilonPlusFlat()),
-)
+algs = Dict("LRP" => LRP, "LREpsilonPlusFlat" => model -> LRP(model, EpsilonPlusFlat()))
 
 # Define benchmark
 _alg(alg, model) = alg(model) # for use with @benchmarkable macro
