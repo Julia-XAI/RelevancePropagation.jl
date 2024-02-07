@@ -28,6 +28,11 @@ end
 # flatten_model
 @test flatten_model(Chain(Chain(Chain(abs)), sqrt, Chain(relu))) == Chain(abs, sqrt, relu)
 @test flatten_model(Chain(abs, sqrt, relu)) == Chain(abs, sqrt, relu)
+@test flatten_model(
+    Chain(Chain(Parallel(+, Chain(Chain(identity)), Chain(Chain(identity)))))
+) == Chain(Parallel(+, Chain(identity), Chain(identity)))
+@test flatten_model(Chain(Chain(SkipConnection(Chain(Chain(identity)), +)))) ==
+    Chain(SkipConnection(Chain(identity), +))
 
 # has_output_softmax
 @test has_output_softmax(Chain(abs, sqrt, relu, softmax)) == true
@@ -59,6 +64,15 @@ x = rand(Float32, 2, 10)
 @test strip_softmax(Chain(Chain(abs), Chain(Chain(softmax)), sqrt)) ==
     Chain(Chain(abs), Chain(Chain(softmax)), sqrt)
 @test strip_softmax(Chain(d_softmax, Chain(d_relu))) == Chain(d_softmax, Chain(d_relu))
+@test strip_softmax(Chain(Parallel(+, softmax, softmax), d_softmax, Chain(d_relu))) ==
+    Chain(Parallel(+, softmax, softmax), d_softmax, Chain(d_relu))
+@test strip_softmax(Chain(SkipConnection(softmax, +), d_softmax, Chain(d_relu))) ==
+    Chain(SkipConnection(softmax, +), d_softmax, Chain(d_relu))
+# Ignore output softmax if in Parallel or SkipConnection dataflow layer
+@test strip_softmax(Chain(d_softmax, Chain(d_relu), Parallel(+, softmax, softmax))) ==
+    Chain(d_softmax, Chain(d_relu), Parallel(+, softmax, softmax))
+@test strip_softmax(Chain(d_softmax, Chain(d_relu), SkipConnection(softmax, +))) ==
+    Chain(d_softmax, Chain(d_relu), SkipConnection(softmax, +))
 
 # stabilize_denom
 A = [1.0 0.0 1.0e-25; -1.0 -0.0 -1.0e-25]
