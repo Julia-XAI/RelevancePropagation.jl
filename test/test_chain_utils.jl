@@ -1,5 +1,5 @@
 using RelevancePropagation: ChainTuple, ParallelTuple, SkipConnectionTuple
-using RelevancePropagation: chainmap, chainindices
+using RelevancePropagation: ModelIndex, chainmap, chainindices
 using RelevancePropagation: activation_fn
 using Flux
 
@@ -16,8 +16,10 @@ c4 = Chain(d1, Chain(d2, d2))
 c5 = Chain(d1, Chain(d2, d2), d3)
 c6 = Chain(Parallel(+, d1, d1))
 c7 = Chain(d1, Parallel(+, d2, d2, Chain(d3, d3)), d4)
-c8 = Chain(d1, SkipConnection(d2, +))
-c9 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
+c8 = Chain(SkipConnection(d1, +))
+c9 = Chain(SkipConnection(SkipConnection(d1, +), +))
+c10 = Chain(d1, SkipConnection(d2, +))
+c11 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
 
 # pre-compute occuring hidden activations, where hXYZ = dX(dY(dZ(x))) = dX(hYZ)
 h1 = d1(x)
@@ -39,19 +41,33 @@ h4p1 = d4(2 * h21 + h331) # output of Chain c6
 @test chainmap(activation_fn, c6) == ChainTuple(ParallelTuple(relu, relu))
 @test chainmap(activation_fn, c7) ==
     ChainTuple(relu, ParallelTuple(selu, selu, ChainTuple(gelu, gelu)), celu)
-@test chainmap(activation_fn, c8) == ChainTuple(relu, SkipConnectionTuple(selu))
+@test chainmap(activation_fn, c8) == ChainTuple(SkipConnectionTuple(relu))
 @test chainmap(activation_fn, c9) ==
+    ChainTuple(SkipConnectionTuple(SkipConnectionTuple(relu)))
+@test chainmap(activation_fn, c10) == ChainTuple(relu, SkipConnectionTuple(selu))
+@test chainmap(activation_fn, c11) ==
     ChainTuple(relu, SkipConnectionTuple(ChainTuple(selu, gelu)), celu)
 
-@test chainindices(c1) == ChainTuple((1,))
-@test chainindices(c2) == ChainTuple((1,), (2,))
-@test chainindices(c3) == ChainTuple(ChainTuple((1, 1), (1, 2)), (2,))
-@test chainindices(c4) == ChainTuple((1,), ChainTuple((2, 1), (2, 2)))
-@test chainindices(c5) == ChainTuple((1,), ChainTuple((2, 1), (2, 2)), (3,))
-@test chainindices(c6) == ChainTuple(ParallelTuple((1, 1), (1, 2)))
+const MI = ModelIndex
+@test chainindices(c1) == ChainTuple(MI(1))
+@test chainindices(c2) == ChainTuple(MI(1), MI(2))
+@test chainindices(c3) == ChainTuple(ChainTuple(MI(1, 1), MI(1, 2)), MI(2))
+@test chainindices(c4) == ChainTuple(MI(1), ChainTuple(MI(2, 1), MI(2, 2)))
+@test chainindices(c5) == ChainTuple(MI(1), ChainTuple(MI(2, 1), MI(2, 2)), MI(3))
+@test chainindices(c6) == ChainTuple(ParallelTuple(MI(1, 1), MI(1, 2)))
 @test chainindices(c7) == ChainTuple(
-    (1,), ParallelTuple((2, 1), (2, 2), ChainTuple((2, 3, 1), (2, 3, 2))), (3,)
+    MI(1), ParallelTuple(MI(2, 1), MI(2, 2), ChainTuple(MI(2, 3, 1), MI(2, 3, 2))), MI(3)
 )
-@test chainindices(c8) == ChainTuple((1,), SkipConnectionTuple((2, 1)))
-@test chainindices(c9) ==
-    ChainTuple((1,), SkipConnectionTuple(ChainTuple((2, 1, 1), (2, 1, 2))), (3,))
+@test chainindices(c8) == ChainTuple(SkipConnectionTuple(MI(1, 1)))
+@test chainindices(c9) == ChainTuple(SkipConnectionTuple(SkipConnectionTuple(MI(1, 1, 1))))
+@test chainindices(c10) == ChainTuple(MI(1), SkipConnectionTuple(MI(2, 1)))
+@test chainindices(c11) ==
+    ChainTuple(MI(1), SkipConnectionTuple(ChainTuple(MI(2, 1, 1), MI(2, 1, 2))), MI(3))
+
+@test ModelIndex(1) ∈ ModelIndex(1)
+@test ModelIndex(1) ∉ ModelIndex(2)
+@test ModelIndex(1, 2) ∈ ModelIndex(1)
+@test ModelIndex(1, 2) ∉ ModelIndex(2)
+@test ModelIndex(1, 2) ∈ ModelIndex(1, 2)
+@test ModelIndex(1, 2, 3) ∈ ModelIndex(1, 2)
+@test ModelIndex(1, 2) ∉ ModelIndex(1, 2, 3)

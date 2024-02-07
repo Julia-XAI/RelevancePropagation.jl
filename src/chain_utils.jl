@@ -141,51 +141,6 @@ function chainall(f, x)
 end
 
 """
-:q
-Sequentially enumerate all layers in a Flux model.
-Nested `Chain` and `Parallel` layers will result in tuples of indices.
-
-# Example:
-```julia-repl
-julia> d = Dense(2, 2);
-
-julia> model = Chain(d, Parallel(+, d, d, Chain(d, d)), d);
-
-julia> chainindices(model)
-ChainTuple(
-  (1,),
-  ParallelTuple(
-    (2, 1),
-    (2, 2),
-    ChainTuple(
-      (2, 3, 1),
-      (2, 3, 2),
-    ),
-  ),
-  (3,),
-)
-```
-"""
-chainindices(model) = chainindices(model, tuple())
-function chainindices(x, key)
-    if isleaf(x)
-        return key
-    else
-        T = constructor(x)
-        keys = map(i -> (key..., i), 1:length(children(x)))
-        return T(chainindices.(children(x), keys)...)
-    end
-end
-
-"""
-    show_layer_indices(model)
-
-Print layer indices of Flux models.
-This is primarily a utility to help define [`LayerMap`](@ref) primitives.
-"""
-show_layer_indices(model) = chainindices(model)
-
-"""
     chainzip(f, x, y)
     chainzip(f, xs...)
 
