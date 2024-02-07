@@ -2,6 +2,7 @@
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Metalhead = "dbeba491-748d-5e0e-a39e-b530a07fa0cc"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"

@@ -1,6 +1,7 @@
 using Test
 using ReferenceTests
 using Aqua
+using JuliaFormatter
 using Random
 
 using RelevancePropagation
@@ -12,6 +13,10 @@ pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
     @testset "Aqua.jl" begin
         @info "Running Aqua.jl's auto quality assurance tests. These might print warnings from dependencies."
         Aqua.test_all(RelevancePropagation; ambiguities=false)
+    end
+    @testset "JuliaFormatter.jl" begin
+        @info "Running JuliaFormatter's code formatting tests."
+        @test format(RelevancePropagation; verbose=false, overwrite=false)
     end
     @testset "Utilities" begin
         @info "Testing utilities..."
