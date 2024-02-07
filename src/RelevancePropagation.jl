@@ -36,7 +36,7 @@ export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
 
 # LRP composites
 export Composite, AbstractCompositePrimitive
-export ChainTuple, ParallelTuple
+export ChainTuple, ParallelTuple, SkipConnectionTuple
 export LayerMap, GlobalMap, RangeMap, FirstLayerMap, LastLayerMap
 export GlobalTypeMap, RangeTypeMap, FirstLayerTypeMap, LastLayerTypeMap
 export FirstNTypeMap
