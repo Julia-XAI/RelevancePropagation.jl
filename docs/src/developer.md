@@ -124,8 +124,9 @@ the `model` to analyze, the LRP `rules` to use, and pre-allocated `modified_laye
 
 As described in the section on [*Composites*](@ref docs-composites),
 applying a composite to a model will return LRP rules in nested
-[`ChainTuple`](@ref) and [`ParallelTuple`](@ref)s.
-These wrapper types are used to match the structure of Flux models with `Chain` and `Parallel` layers while avoiding type piracy.
+[`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref)s.
+These wrapper types are used to match the structure of Flux models with `Chain`, 
+`Parallel` and `SkipConnection` layers while avoiding type piracy.
 
 When creating an `LRP` analyzer with the default keyword argument `flatten=true`, 
 `flatten_model` is called on the model and rules.
@@ -133,8 +134,8 @@ This is done for performance reasons, as discussed in
 [*Flattening the model*](@ref docs-lrp-flatten-model).
 
 After passing the [*Model checks*](@ref docs-lrp-model-checks),
-modified layers are pre-allocated, once again using the `ChainTuple` and `ParallelTuple`
-wrapper types to match the structure of the model.
+modified layers are pre-allocated, once again using the `ChainTuple`, `ParallelTuple` 
+and `SkipConnectionTuple` wrapper types to match the structure of the model.
 If a rule doesn't modify a layer, 
 the corresponding entry in `modified_layers` is set to `nothing`, 
 avoiding unnecessary allocations. 
