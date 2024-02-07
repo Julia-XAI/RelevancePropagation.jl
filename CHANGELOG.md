@@ -1,6 +1,11 @@
-# ExplainableAI.jl
+# RelevancePropagation.jl
+## Version `v1.1.0`
+* ![Feature][badge-feature] Support `SkipConnection` layers ([#8][pr-8])
+* ![Documentation][badge-docs] Document LRP rule notation in API reference 
+  ([e11c234](https://github.com/Julia-XAI/RelevancePropagation.jl/commit/e11c234c09b7c5232acc5f254379ea5bd01d1e7c))
+
 ## Version `v1.0.1`
-* ![Documentation][badge-docs] Update documentation ([#7][pr-7])
+* ![Documentation][badge-docs] Reorganize documentation ([#7][pr-7])
 
 ## Version `v1.0.0`
 Initial release of RelevancePropagation.jl.
@@ -17,6 +22,7 @@ Initial release of RelevancePropagation.jl.
 ![Documentation][badge-docs]
 -->
 
+[pr-8]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/8
 [pr-7]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/7
 
 [badge-breaking]: https://img.shields.io/badge/BREAKING-red.svg
