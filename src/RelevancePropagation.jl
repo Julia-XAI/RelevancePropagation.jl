@@ -7,6 +7,7 @@ using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
 using MacroTools: @forward
 using Flux
+import Flux: Scale
 using Zygote
 using Markdown
 

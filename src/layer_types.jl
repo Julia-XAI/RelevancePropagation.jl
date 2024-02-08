@@ -39,6 +39,7 @@ This includes the usage of allowed activation functions as layers.
 const LRPSupportedLayer = Union{
     DataflowLayer,
     Dense,
+    Scale,
     ConvLayer,
     DropoutLayer,
     NormalizationLayer,
