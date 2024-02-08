@@ -218,7 +218,7 @@ function modify_parameters(r::GammaRule, param::AbstractArray)
     γ = convert(eltype(param), r.γ)
     return @. param + γ * keep_positive(param)
 end
-function modify_layer(rule::GammaRule, layer::Scale; keep_bias=true)
+function modify_layer(rule, layer::Scale; keep_bias=true)
     scale = modify_weight(rule, layer.scale)
     bias = if layer.bias == false
         false
