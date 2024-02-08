@@ -6,6 +6,7 @@ In case the layer is unknown or no activation function is found, `nothing` is re
 """
 activation_fn(layer) = nothing
 activation_fn(l::Dense)         = l.σ
+activation_fn(l::Scale)         = l.σ
 activation_fn(l::Conv)          = l.σ
 activation_fn(l::CrossCor)      = l.σ
 activation_fn(l::ConvTranspose) = l.σ

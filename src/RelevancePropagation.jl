@@ -7,8 +7,9 @@ using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
 using MacroTools: @forward
 using Flux
-import Flux: Scale
+import Flux: Scale, normalise
 using Zygote
+import ChainRulesCore: ignore_derivatives
 using Markdown
 
 include("bibliography.jl")
