@@ -213,9 +213,21 @@ struct GammaRule{T<:Real} <: AbstractLRPRule
     γ::T
     GammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
 end
+is_compatible(rule::GammaRule, layer::Scale) = true
 function modify_parameters(r::GammaRule, param::AbstractArray)
     γ = convert(eltype(param), r.γ)
     return @. param + γ * keep_positive(param)
+end
+function modify_layer(rule::GammaRule, layer::Scale; keep_bias=true)
+    scale = modify_weight(rule, layer.scale)
+    bias = if layer.bias == false
+        false
+    elseif !keep_bias
+        zero(layer.bias)
+    else
+        modify_bias(rule, layer.bias)
+    end
+    return Scale(scale, bias, layer.σ)
 end
 
 # Internally used for GeneralizedGammaRule:
