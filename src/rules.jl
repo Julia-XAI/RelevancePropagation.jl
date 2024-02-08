@@ -531,23 +531,9 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer, modified_layers, aᵏ, R�
 end
 
 """
-    LayerNormRule(affine_rule=ZeroRule())
-
-LayerNormRule rule.
-
-# Optional arguments
-- `affine_rule`: Rule applied to affine transformation, defaults to `ZeroRule()`.
-
-# References
-- 
+#
 """
-struct LayerNormRule{T <: AbstractLRPRule} <: AbstractLRPRule
-    affine_rule::T
-end
-
-LayerNormRule() = LayerNormRule(ZeroRule())
-
-function lrp!(Rᵏ, rule::LayerNormRule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     # forward pass: split in normalization and scale
     # aᵏ ->(normalize) aᵏₙ ->(scale) aᵏ⁺¹
     ## normalize
@@ -560,7 +546,7 @@ function lrp!(Rᵏ, rule::LayerNormRule, layer::LayerNorm, modified_layer, aᵏ,
     ## Rᵏ⁺¹ ->(scale) Rᵏₙ ->(normalize) Rᵏ
     ## scale: call LRP on affine layer with "subrule" rule.affine_rule
     Rᵏₙ = similar(aᵏₙ)
-    lrp!(Rᵏₙ, rule.affine_rule, layer.diag, modify_layer(rule.affine_rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
+    lrp!(Rᵏₙ, rule, layer.diag, modify_layer(rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
     ## normalize
     s = @. Rᵏₙ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
     Rᵏ .= aᵏ .* (s .- mean(s, dims = 1:length(layer.size)))
