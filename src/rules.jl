@@ -537,9 +537,10 @@ function lrp!(Rᵏ, rule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     # forward pass: split in normalization and scale
     # aᵏ ->(normalize) aᵏₙ ->(scale) aᵏ⁺¹
     ## normalize
+    n_dims = 1:length(layer.size)
     eps = convert(float(eltype(aᵏ)), layer.ϵ)
-    μ = mean(aᵏ; dims = 1:length(layer.size))
-    σ = std(aᵏ, dims=1:length(layer.size), mean=μ, corrected=false)
+    μ = mean(aᵏ; dims=n_dims)
+    σ = std(aᵏ, dims=n_dims, mean=μ, corrected=false)
     z = aᵏ - μ
     aᵏₙ = @. z / (σ + eps)
     # lrp pass
@@ -548,7 +549,7 @@ function lrp!(Rᵏ, rule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     lrp!(Rᵏ, rule, layer.diag, modify_layer(rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
     ## normalize
     s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
-    Rᵏ .= aᵏ .* (s .- mean(s, dims = 1:length(layer.size)))
+    Rᵏ .= aᵏ .* (s .- mean(s, dims=n_dims))
 end
 
 #=========================#
