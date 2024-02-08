@@ -547,26 +547,22 @@ end
 
 LayerNormRule() = LayerNormRule(ZeroRule())
 
-function detached_normalise(aᵏ, layer)
-    dims = 1:length(layer.size)
-    eps = convert(float(eltype(aᵏ)), layer.ϵ)
-    μ = mean(aᵏ, dims = dims)
-    σ = ignore_derivatives(std(aᵏ, dims=dims, mean=μ, corrected=false))
-    return @. (aᵏ - μ) / (σ + eps)
-end
-
 function lrp!(Rᵏ, rule::LayerNormRule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     # forward pass: split in normalization and scale
     # aᵏ ->(normalize) aᵏₙ ->(scale) aᵏ⁺¹
     ## normalize
-    aᵏₙ, back = Zygote.pullback(x -> detached_normalise(x, layer), aᵏ)
+    eps = convert(float(eltype(aᵏ)), layer.ϵ)
+    μ = mean(aᵏ; dims = 1:length(layer.size))
+    σ = std(aᵏ, dims=1:length(layer.size), mean=μ, corrected=false)
+    aᵏₙ = @. (aᵏ - μ) / (σ + eps)
     # lrp pass
     ## Rᵏ⁺¹ ->(scale) Rᵏₙ ->(normalize) Rᵏ
     ## scale: call LRP on affine layer with "subrule" rule.affine_rule
     Rᵏₙ = similar(aᵏₙ)
     lrp!(Rᵏₙ, rule.affine_rule, layer.diag, modify_layer(rule.affine_rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
     ## normalize
-    Rᵏ .= aᵏ .* back(Rᵏₙ ./ aᵏₙ)[1]
+    s = Rᵏₙ ./ (aᵏ .- μ)
+    Rᵏ .= aᵏ .* (s .- mean(s, dims = 1:length(layer.size)))
 end
 
 #=========================#
