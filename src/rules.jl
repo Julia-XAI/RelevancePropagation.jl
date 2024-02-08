@@ -554,14 +554,15 @@ function lrp!(Rᵏ, rule::LayerNormRule, layer::LayerNorm, modified_layer, aᵏ,
     eps = convert(float(eltype(aᵏ)), layer.ϵ)
     μ = mean(aᵏ; dims = 1:length(layer.size))
     σ = std(aᵏ, dims=1:length(layer.size), mean=μ, corrected=false)
-    aᵏₙ = @. (aᵏ - μ) / (σ + eps)
+    z = aᵏ - μ
+    aᵏₙ = @. z / (σ + eps)
     # lrp pass
     ## Rᵏ⁺¹ ->(scale) Rᵏₙ ->(normalize) Rᵏ
     ## scale: call LRP on affine layer with "subrule" rule.affine_rule
     Rᵏₙ = similar(aᵏₙ)
     lrp!(Rᵏₙ, rule.affine_rule, layer.diag, modify_layer(rule.affine_rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
     ## normalize
-    s = Rᵏₙ ./ (aᵏ .- μ)
+    s = @. Rᵏₙ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
     Rᵏ .= aᵏ .* (s .- mean(s, dims = 1:length(layer.size)))
 end
 
