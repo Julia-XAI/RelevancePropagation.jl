@@ -1,3 +1,7 @@
+#=============================#
+# Functions to fuse layers    #
+#=============================#
+
 function fuse_batchnorm(d::Dense, bn::BatchNorm)
     d.σ != identity &&
         throw(ArgumentError("Can't fuse Dense layer with activation $(d.σ)."))
@@ -26,6 +30,29 @@ end
 is_fuseable(l::Union{Dense,Conv}, bn::BatchNorm) = activation_fn(l) == identity
 is_fuseable(l1, l2) = false
 
+#=============================#
+# Functions to split layers   #
+#=============================#
+
+function split_layer(l::LayerNorm)
+    layer_norm = LayerNorm(identity, identity, l.ϵ, l.size, false)
+    if l.diag isa Scale
+        diag = l.diag
+    else # in case the LayerNorm layer does not contain an affine transformation, but an activation
+        diag = Scale(1, l.λ; bias=false)
+        diag.scale .= 1.0
+    end
+    return (layer_norm, diag)
+end
+
+is_splittable(l::LayerNorm) = true
+is_splittable(l::LayerNorm{F,D,T,N}) where {F,D<:typeof(identity),T,N} = false # don't split any further if the affine part is already the identity
+is_splittable(l) = false
+
+#=================================#
+# Canonize model (split and fuse) #
+#=================================#
+
 """
     canonize(model)
 
@@ -33,12 +60,38 @@ Canonize model by flattening it and fusing BatchNorm layers into preceding Dense
 layers with linear activation functions.
 """
 function canonize(model::Chain)
-    model = flatten_model(model)
-    return _canonize(model)
+    model = canonize_split(model)
+    model = canonize_fuse(flatten_model(model))
+    return model
 end
 
-function _canonize(model::Chain)
-    model = Chain(_canonize.(model.layers)) # recursively canonize Parallel layers
+function canonize_split(model::Chain)
+    model = Chain(canonize_split.(model.layers)) # recursively canonize Parallel layers
+
+    i = 1
+    while i <= length(model)
+        l = model[i]
+
+        if is_splittable(l)
+            splitted = split_layer(l)
+            model = Chain(model[1:(i - 1)]..., splitted..., model[(i + 1):end]...)
+            # if fused, don't increment i,
+            # instead try fusing the new layer with the next one
+        else
+            i += 1
+        end
+    end
+    return model
+end
+
+function canonize_split(p::Parallel)
+    return Parallel(p.connection, canonize_split.(p.layers))
+end
+
+canonize_split(layer) = layer
+
+function canonize_fuse(model::Chain)
+    model = Chain(canonize_fuse.(model.layers)) # recursively canonize Parallel layers
 
     i = 1
     while i < length(model)
@@ -56,8 +109,19 @@ function _canonize(model::Chain)
     return model
 end
 
-function _canonize(p::Parallel)
-    return Parallel(p.connection, _canonize.(p.layers))
+function canonize_fuse(p::Parallel)
+    return Parallel(p.connection, canonize_fuse.(p.layers))
 end
 
-_canonize(layer) = layer
+canonize_fuse(layer) = layer
+
+#= chainflatten(l::LayerNorm) = _chainflatten(l)
+function _chainflatten(l::LayerNorm)
+    if l.diag isa typeof(identity)
+        return l
+    else
+        norm = LayerNorm(identity, identity, l.ϵ, l.size, false)
+        diag = l.diag
+        return [norm, diag]
+    end
+end =#

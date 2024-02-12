@@ -4,6 +4,8 @@ Composite(
     ConvTranspose           => AlphaBetaRule{Float32}(2.0f0, 1.0f0),
     CrossCor                => AlphaBetaRule{Float32}(2.0f0, 1.0f0),
     Dense                   => EpsilonRule{Float32}(1.0f-6),
+    Flux.Scale              => EpsilonRule{Float32}(1.0f-6),
+    LayerNorm               => LayerNormRule(),
     typeof(dropout)         => PassRule(),
     AlphaDropout            => PassRule(),
     Dropout                 => PassRule(),

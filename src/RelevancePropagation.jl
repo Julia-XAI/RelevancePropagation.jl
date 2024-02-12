@@ -10,6 +10,7 @@ using Flux
 import Flux: Scale, normalise
 using Zygote
 using Markdown
+import Statistics: mean
 
 include("bibliography.jl")
 include("layer_types.jl")
@@ -34,6 +35,7 @@ export AbstractLRPRule
 export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
+export LayerNormRule
 
 # LRP composites
 export Composite, AbstractCompositePrimitive

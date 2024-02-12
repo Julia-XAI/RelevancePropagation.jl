@@ -533,7 +533,10 @@ end
 """
 #
 """
-function lrp!(Rᵏ, rule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
+struct LayerNormRule <: AbstractLRPRule end
+is_compatible(::LayerNormRule, ::LayerNorm) = true
+
+function lrp!(Rᵏ, rule::LayerNormRule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     # forward pass: split in normalization and scale
     # aᵏ ->(normalize) aᵏₙ ->(scale) aᵏ⁺¹
     ## normalize
@@ -546,10 +549,32 @@ function lrp!(Rᵏ, rule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
     # lrp pass
     ## Rᵏ⁺¹ ->(scale) Rᵏ ->(normalize) Rᵏ
     ## scale: call LRP on affine layer with "subrule" rule.affine_rule
-    lrp!(Rᵏ, rule, layer.diag, modify_layer(rule, layer.diag), aᵏₙ, Rᵏ⁺¹)
     ## normalize
     s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
     Rᵏ .= aᵏ .* (s .- mean(s, dims=n_dims))
+end 
+
+function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm{F,D}, _modified_layer, aᵏ, Rᵏ⁺¹) where {F,D<:typeof(identity)}
+    n_dims = 1:length(layer.size)
+    μₐ = mean(aᵏ; dims=n_dims)
+    s = @. Rᵏ⁺¹ / stabilize_denom(aᵏ - μₐ, LRP_DEFAULT_STABILIZER)
+    μₛ = mean(s; dims=n_dims)
+    @. Rᵏ = aᵏ * (s - μₛ)
+end
+
+function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, Rᵏ⁺¹)
+    n_dims = 1:length(layer.size)
+    μₐ = mean(aᵏ; dims=n_dims)
+    # forward pass: compute normalized inputs aᵏ ->(normalize) aᵏₙ 
+    z = aᵏ .- μₐ
+    σ = std(aᵏ, dims=n_dims, mean=μₐ, corrected=false)
+    aᵏₙ = @. z / (σ + eps)
+    # call ZeroRule on affine part as a fallback when model is not canonized
+    lrp!(Rᵏ, ZeroRule(), layer.diag, nothing, aᵏₙ, Rᵏ⁺¹)
+    # compute LRP pass through normalization
+    s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
+    μₛ = mean(s; dims=n_dims)
+    @. Rᵏ = aᵏ * (s - μₛ)
 end
 
 #=========================#
