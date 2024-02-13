@@ -1,4 +1,4 @@
-# # [Concept Relevance Propagation](@id docs-crp)
+# # Concept Relevance Propagation
 # In [*From attribution maps to human-understandable explanations through Concept Relevance Propagation*](https://www.nature.com/articles/s42256-023-00711-8) (CRP),
 # Achtibat et al. propose the conditioning of LRP relevances on individual features of a model.
 

@@ -1,4 +1,4 @@
-# # [Custom LRP Rules](@id docs-custom-rules)
+# # [Custom LRP Rules](@id custom-rules)
 # One of the design goals of RelevancePropagation.jl is to combine ease of use and
 # extensibility for the purpose of research.
 
@@ -27,7 +27,7 @@ model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet
 # The rule has to be of supertype `AbstractLRPRule`.
 struct MyGammaRule <: AbstractLRPRule end
 
-# ### [Step 2: Implement rule behavior](@id docs-custom-rules-impl)
+# ### Step 2: Implement rule behavior
 # It is then possible to dispatch on the following four utility functions
 # with the rule type `MyCustomLRPRule` to define custom rules without writing boilerplate code.
 #
@@ -87,7 +87,7 @@ heatmap(input, analyzer)
 #    defining `modify_layer(::MyRule, layer) = nothing`
 #    can provide reduce memory allocations and improve performance.
 
-# ## [Advanced layer modification](@id docs-custom-rules-advanced)
+# ## [Advanced layer modification](@id custom-rules-advanced)
 # For more granular control over weights and biases,
 # [`modify_weight`](@ref RelevancePropagation.modify_weight) and
 # [`modify_bias`](@ref RelevancePropagation.modify_bias) can be used.
@@ -128,4 +128,4 @@ heatmap(input, analyzer)
 
 # ## Advanced LRP rules
 # To implement custom LRP rules that require more than `modify_layer`, `modify_input`
-# and `modify_denominator`, take a look at the [LRP developer documentation](@ref lrp-dev-docs).
+# and `modify_denominator`, take a look at the [LRP developer documentation](@ref developer).
