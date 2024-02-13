@@ -106,7 +106,7 @@ heatmap(input, analyzer)
 
 # LRP's strength lies in assigning different rules to different layers,
 # based on their functionality in the neural network[^1].
-# RelevancePropagation.jl [implements many LRP rules out of the box](@ref api-lrp-rules),
+# RelevancePropagation.jl [implements many LRP rules out of the box](@ref rules),
 # but it is also possible to [*implement custom rules*](@ref docs-custom-rules).
 #
 # To assign different rules to different layers,

@@ -28,18 +28,19 @@ makedocs(;
     format=Documenter.HTML(; prettyurls=get(ENV, "CI", "false") == "true", assets=String[]),
     #! format: off
     pages=[
-        "Home"            => "index.md",
-        "Basic Usage"     => [
+        "Home"              => "index.md",
+        "Basic Usage"       => [
             "Creating an LRP Analyzer"      => "generated/basics.md",
             "Assigning Rules to Layers"     => "generated/composites.md",
             "Concept Relevance Propagation" => "generated/crp.md",
         ],
-        "Advanced Usage"  => Any[
+        "Advanced Usage"    => Any[
             "Supporting New Layer Types"    => "generated/custom_layer.md",
             "Custom LRP Rules"              => "generated/custom_rules.md",
             "Developer Documentation"       => "developer.md",
         ],
-        "API Reference"   => "api.md",
+        "LRP Rule Overview" => "rules.md",
+        "API Reference"     => "api.md",
     ],
     #! format: on
     linkcheck=true,
