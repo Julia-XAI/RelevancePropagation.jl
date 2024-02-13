@@ -1,4 +1,4 @@
-# [Developer Documentation](@id lrp-dev-docs)
+# [Developer Documentation](@id developer)
 ## Generic LRP rule implementation
 Before we dive into package-specific implementation details 
 in later sections of this developer documentation, 
@@ -19,7 +19,7 @@ where
 *  $a^{k+1}$ is the activation vector at the output of layer $k$
 *  $R^k$ is the relevance vector at the input of layer $k$
 *  $R^{k+1}$ is the relevance vector at the output of layer $k$
-*  $\rho$ is a function that modifies parameters (what we call [`modify_parameters`](@ref docs-custom-rules-impl))
+*  $\rho$ is a function that modifies parameters (what we call [`modify_parameters`](@ref custom-rules))
 *  $\epsilon$ is a small positive constant to avoid division by zero
 
 
@@ -49,7 +49,7 @@ convolutional layers, pooling layers, and normalization layers.
 We will now describe a generic implementation of equation (1) 
 that can be applied to any linear layer.
 
-### [The automatic differentiation fallback](@id lrp-dev-ad-fallback)
+### [The automatic differentiation fallback](@id fallback)
 The computation of the generic LRP rule can be decomposed into four steps[^1]:
 
 ```math
@@ -122,7 +122,7 @@ For more background information on automatic differentiation, refer to the
 The [`LRP`](@ref) analyzer struct holds three fields:
 the `model` to analyze, the LRP `rules` to use, and pre-allocated `modified_layers`.
 
-As described in the section on [*Composites*](@ref docs-composites),
+As described in the section on [*Composites*](@ref composites),
 applying a composite to a model will return LRP rules in nested
 [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref)s.
 These wrapper types are used to match the structure of Flux models with `Chain`, 
@@ -131,9 +131,9 @@ These wrapper types are used to match the structure of Flux models with `Chain`,
 When creating an `LRP` analyzer with the default keyword argument `flatten=true`, 
 `flatten_model` is called on the model and rules.
 This is done for performance reasons, as discussed in 
-[*Flattening the model*](@ref docs-lrp-flatten-model).
+[*Flattening the model*](@ref flatten-model).
 
-After passing the [*Model checks*](@ref docs-lrp-model-checks),
+After passing the [*Model checks*](@ref model-checks),
 modified layers are pre-allocated, once again using the `ChainTuple`, `ParallelTuple` 
 and `SkipConnectionTuple` wrapper types to match the structure of the model.
 If a rule doesn't modify a layer, 
@@ -145,7 +145,7 @@ Apart from these special cases,
 the corresponding entry in `modified_layers` is simply set to the modified layer.
 
 For a detailed description of the layer modification mechanism, refer to the section on
-[*Advanced layer modification*](@ref docs-custom-rules-advanced).
+[*Advanced layer modification*](@ref custom-rules-advanced).
 
 ## Forward and reverse pass
 When calling an `LRP` analyzer, a forward pass through the model is performed,
@@ -189,7 +189,7 @@ in Julia to denote functions that modify their arguments --
 in this case the first argument `Rs[k]`, which corresponds to $R^k$.
 
 ### Rule calls
-As discussed in [*The AD fallback*](@ref lrp-dev-ad-fallback),
+As discussed in [*The AD fallback*](@ref fallback),
 the default LRP fallback for unknown layers uses AD via 
 [Zygote](https://github.com/FluxML/Zygote.jl).
 Now that you are familiar with both the API and the four-step computation of the generic LRP rules,

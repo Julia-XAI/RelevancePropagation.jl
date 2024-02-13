@@ -39,6 +39,12 @@ Pages = [
 Depth = 3
 ```
 
+## LRP Rule Overview
+```@contents
+Pages = ["rules.md"]
+Depth = 3
+```
+
 ## API Reference
 ```@contents
 Pages = ["api.md"]
