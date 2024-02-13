@@ -1,4 +1,4 @@
-# # [Creating an LRP Analyzer](@id docs-lrp-basics)
+# # Creating an LRP Analyzer
 
 #md # !!! note
 #md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
@@ -23,29 +23,29 @@ model = Chain(
 );
 # This model contains two chains: the convolutional layers and the fully connected layers.
 
-# ## [Model preparation](@id docs-lrp-model-prep)
+# ## Model preparation
 
 #md # !!! note "TLDR"
 #md #
 #md #     1. Use [`strip_softmax`](@ref) to strip the output softmax from your model.
-#md #        Otherwise [model checks](@ref docs-lrp-model-checks) will fail.
+#md #        Otherwise [model checks](@ref model-checks) will fail.
 #md #     1. Use [`canonize`](@ref) to fuse linear layers.
 #md #     1. Don't just call `LRP(model)`, instead use a [`Composite`](@ref)
 #md #        to apply LRP rules to your model.
-#md #        Read [*Assigning rules to layers*](@ref docs-composites) for more information.
+#md #        Read [*Assigning rules to layers*](@ref composites) for more information.
 #md #     1. By default, `LRP` will call [`flatten_model`](@ref) to flatten your model.
 #md #        This reduces computational overhead.
 
-# ### [Stripping the output softmax](@id docs-lrp-strip-softmax)
+# ### Stripping the output softmax
 # When using LRP, it is recommended to explain output logits instead of probabilities.
 # This can be done by stripping the output softmax activation from the model
 # using the [`strip_softmax`](@ref) function:
 model = strip_softmax(model)
 
 # If you don't remove the output softmax,
-# [model checks](@ref docs-lrp-model-checks) will fail.
+# [model checks](@ref model-checks) will fail.
 
-# ### [Canonizing the model](@id docs-lrp-canonization)
+# ### [Model canonization](@id canonization)
 # LRP is not invariant to a model's implementation.
 # Applying the [`GammaRule`](@ref) to two linear layers in a row will yield different results
 # than first fusing the two layers into one linear layer and then applying the rule.
@@ -56,7 +56,7 @@ model_canonized = canonize(model)
 # The second `BatchNorm` layer wasn't fused
 # since its preceding `Conv` layer has a ReLU activation function.
 
-# ### [Flattening the model](@id docs-lrp-flatten-model)
+# ### [Flattening the model](@id flatten-model)
 # RelevancePropagation.jl's LRP implementation supports nested Flux Chains and Parallel layers.
 # However, it is recommended to flatten the model before analyzing it.
 #
@@ -107,12 +107,12 @@ heatmap(input, analyzer)
 # LRP's strength lies in assigning different rules to different layers,
 # based on their functionality in the neural network[^1].
 # RelevancePropagation.jl [implements many LRP rules out of the box](@ref rules),
-# but it is also possible to [*implement custom rules*](@ref docs-custom-rules).
+# but it is also possible to [*implement custom rules*](@ref custom-rules).
 #
 # To assign different rules to different layers,
 # use one of the [composites presets](@ref api-composite-presets),
 # or create your own composite, as described in
-# [*Assigning rules to layers*](@ref docs-composites).
+# [*Assigning rules to layers*](@ref composites).
 
 composite = EpsilonPlusFlat() # using composite preset EpsilonPlusFlat
 #-
@@ -120,7 +120,7 @@ analyzer = LRP(model, composite)
 #-
 heatmap(input, analyzer)
 
-# ## [Computing layerwise relevances](@id docs-lrp-layerwise)
+# ## Computing layerwise relevances
 # If you are interested in computing layerwise relevances,
 # call `analyze` with an LRP analyzer and the keyword argument
 # `layerwise_relevances=true`.
@@ -134,8 +134,8 @@ expl.extras.layerwise_relevances
 # Note that the layerwise relevances are only kept for layers in the outermost `Chain` of the model.
 # Since we used a flattened model, we obtained all relevances.
 
-# ## [Performance tips](@id docs-lrp-performance)
-# ### [Using LRP with a GPU](@id gpu-docs)
+# ## Performance tips
+# ### Using LRP with a GPU
 # All LRP analyzers support GPU backends,
 # building on top of [Flux.jl's GPU support](https://fluxml.ai/Flux.jl/stable/gpu/).
 # Using a GPU only requires moving the input array and model weights to the GPU.

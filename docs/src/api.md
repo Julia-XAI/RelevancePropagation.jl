@@ -19,8 +19,7 @@ canonize
 flatten_model
 ```
 
-## [LRP rules](@id api-lrp-rules)
-
+## LRP rules
 Refer to the [LRP rule overview](@ref rules) for a detailed explanation 
 of the notation used for LRP rules.
 
@@ -91,7 +90,7 @@ EpsilonAlpha2Beta1Flat
 ```
 
 ### Manual rule assignment
-For [manual rule assignment](@ref docs-composites-manual), use `ChainTuple`, 
+For [manual rule assignment](@ref composites-manual), use `ChainTuple`, 
 `ParallelTuple` and `SkipConnectionTuple`, matching the model structure:
 ```@docs
 ChainTuple
