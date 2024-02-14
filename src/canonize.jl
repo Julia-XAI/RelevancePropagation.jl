@@ -114,14 +114,3 @@ function canonize_fuse(p::Parallel)
 end
 
 canonize_fuse(layer) = layer
-
-#= chainflatten(l::LayerNorm) = _chainflatten(l)
-function _chainflatten(l::LayerNorm)
-    if l.diag isa typeof(identity)
-        return l
-    else
-        norm = LayerNorm(identity, identity, l.ϵ, l.size, false)
-        diag = l.diag
-        return [norm, diag]
-    end
-end =#

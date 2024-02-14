@@ -21,6 +21,7 @@ const RULES = Dict(
     "FlatRule"             => FlatRule(),
     "ZPlusRule"            => ZPlusRule(),
     "GeneralizedGammaRule" => GeneralizedGammaRule(),
+    "LayerNormRule"        => LayerNormRule(),
 )
 
 ## Hand-written tests
@@ -52,6 +53,36 @@ const RULES = Dict(
     Rᵏ = reshape(repeat(Rᵏ, 1, 3), 3, 3, 3, 1)
 
     layer = MaxPool((2, 2); stride=(1, 1))
+    modified_layer = modify_layer(rule, layer)
+
+    R̂ᵏ = similar(aᵏ) # will be inplace updated
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @test R̂ᵏ ≈ Rᵏ
+
+    ## Scale layer
+    Rᵏ⁺¹ = reshape([1 / 3 2 / 3], 2, 1)
+    aᵏ = reshape([1.0 2.0], 2, 1)
+    w = [-2.0, 2.0]
+    b = [1.0, -3.0]
+    Rᵏ = reshape([2 / 3, 8 / 3], 2, 1) # expected output
+
+    layer = Scale(w, b, relu)
+    modified_layer = modify_layer(rule, layer)
+
+    R̂ᵏ = similar(aᵏ) # will be inplace updated
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @test R̂ᵏ ≈ Rᵏ
+
+    ## LayerNorm layer
+    Rᵏ⁺¹ = reshape(repeat([1/3 1/3; 2/3 2/3], 4), 2, 2, 2, 2)
+    aᵏ = reshape(repeat([1.0, 2.0]; inner=(2, 2, 2)), 2, 2, 2, 2)
+    w = [-2.0, 2.0]
+    b = [1.0, -3.0]
+    Rᵏ = reshape(hcat([[2/15 2/45; 172/45 -188/45]' for _ in 1:4]...), 2, 2, 2, 2) # expected output
+
+    layer = LayerNorm(2, 2, relu; eps=0)
+    layer.diag.scale .= w
+    layer.diag.bias .= b
     modified_layer = modify_layer(rule, layer)
 
     R̂ᵏ = similar(aᵏ) # will be inplace updated
@@ -177,9 +208,97 @@ end
     @test R̂ᵏ ≈ Rᵏ
 end
 
+@testset "LayerNormRule analytic" begin
+    rule = LayerNormRule()
+
+    Rᵏ⁺¹ = reshape(repeat([1/3 1/3; 2/3 2/3], 4), 2, 2, 2, 2)
+    aᵏ = reshape(repeat([1.0, 2.0]; inner=(2, 2, 2)), 2, 2, 2, 2)
+    w = [-2.0, 2.0]
+    b = [1.0, -3.0]
+    Rᵏ = reshape(hcat([[2/15 2/45; 172/45 -188/45]' for _ in 1:4]...), 2, 2, 2, 2) # expected output
+
+    # LayerNorm can be constructed in different ways (w/o relu, w/o affine)
+    # and used either without canonizing the model (using the default ZeroRule() as a fallback)
+    # or canonized, splitting the LayerNorm in two parts (normalization and affine transformation).
+    # In the following, we test different combinations of this.
+
+    ###################
+    # relu activation #
+    ###################
+    layer = LayerNorm(2, 2, relu; eps=0)
+    layer.diag.scale .= w
+    layer.diag.bias .= b
+
+    # not canonized
+    modified_layer = modify_layer(rule, layer)
+    R̂ᵏ = similar(aᵏ) # will be inplace updated
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @test R̂ᵏ ≈ Rᵏ
+
+    # canonized
+    model = Chain(layer)
+    model = canonize(model)
+    modified_layer_1 = modify_layer(LayerNormRule(), model[1])
+    modified_layer_2 = modify_layer(ZeroRule(), model[2])
+
+    R̂ᵏ = zero(aᵏ) # will be inplace updated
+    aₙ = model[1](aᵏ)
+    R = similar(aₙ)
+
+    @inferred lrp!(R, ZeroRule(), model[2], modified_layer_2, aₙ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, model[1], modified_layer_1, aᵏ, R)
+    @test R̂ᵏ ≈ Rᵏ
+
+    ############################
+    # no affine transformation #
+    ############################
+    layer = LayerNorm(2, 2; affine=false, eps=0)
+
+    # not canonized
+    modified_layer = modify_layer(rule, layer)
+    R̂ᵏ = similar(aᵏ) # will be inplace updated
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    @test R̂ᵏ ≈ Rᵏ
+
+    # canonized
+    model = Chain(layer)
+    model = canonize(model)
+    modified_layer = modify_layer(LayerNormRule(), model[1])
+
+    R̂ᵏ = zero(aᵏ)
+    @inferred lrp!(R̂ᵏ, rule, model[1], modified_layer_1, aᵏ, R)
+    @test R̂ᵏ ≈ Rᵏ
+
+    ######################################
+    # no affine transformation, but relu #
+    ######################################
+    layer = LayerNorm(2, 2, relu; affine=false, eps=0)
+
+    # not canonized
+    modified_layer = modify_layer(rule, layer)
+    R̂ᵏ = zero(aᵏ) # will be inplace updated
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    @test R̂ᵏ ≈ Rᵏ
+
+    # canonized
+    model = Chain(layer)
+    model = canonize(model)
+    modified_layer_1 = modify_layer(LayerNormRule(), model[1])
+    modified_layer_2 = modify_layer(ZeroRule(), model[2])
+
+    R̂ᵏ = zero(aᵏ) # will be inplace updated
+    aₙ = model[1](aᵏ)
+
+    @inferred lrp!(R, ZeroRule(), model[2], modified_layer_2, aₙ, R)
+    @inferred lrp!(R̂ᵏ, rule, model[1], modified_layer_1, aᵏ, R)
+    @test R̂ᵏ ≈ Rᵏ
+end
+
 ## Test individual rules
 @testset "modify_parameters" begin
     rule = GammaRule(0.42)
+
+    # Dense layer
     W, b = [1.0 -1.0; 2.0 0.0], [-1.0, 1.0]
     layer = Dense(W, b, relu)
 
@@ -209,6 +328,14 @@ end
     b = @inferred modify_bias(rule, b)
     @test W ≈ [1.42 -1.0; 2.84 0.0]
     @test b ≈ [-1.0, 1.42]
+
+    # Scale layer
+    a, b = [1.0, -1.0], [-1.0, 1.0]
+    layer = Scale(a, b, relu)
+
+    modified_layer = modify_layer(rule, layer)
+    @test modified_layer.scale ≈ [1.42, -1.0]
+    @test modified_layer.bias ≈ [-1.0, 1.42]
 end
 
 function run_rule_tests(rule, layer, rulename, layername, aᵏ)
@@ -236,6 +363,28 @@ layers = Dict(
     "Dense_identity" => Dense(Matrix{Float32}(I, dout, din), false, identity),
 )
 @testset "Dense" begin
+    for (rulename, rule) in RULES
+        @testset "$rulename" begin
+            for (layername, layer) in layers
+                @testset "$layername" begin
+                    run_rule_tests(rule, layer, rulename, layername, aᵏ_dense)
+                end
+            end
+        end
+    end
+end
+
+## Test Scale layer
+# Define Scale test input
+d = 4 # input + output dimension
+batchsize = 2
+aᵏ_dense = pseudorandn(d, batchsize)
+
+layers = Dict(
+    "Scale_relu"     => Scale(pseudorandn(d), pseudorandn(d), relu),
+    "Scale_identity" => Scale(ones(Float32, d), false, identity),
+)
+@testset "Scale" begin
     for (rulename, rule) in RULES
         @testset "$rulename" begin
             for (layername, layer) in layers

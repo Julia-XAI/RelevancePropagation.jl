@@ -10,7 +10,7 @@ using Flux
 import Flux: Scale, normalise
 using Zygote
 using Markdown
-import Statistics: mean
+import Statistics: mean, std
 
 include("bibliography.jl")
 include("layer_types.jl")
