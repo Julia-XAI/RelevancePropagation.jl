@@ -520,7 +520,23 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer, modified_layers, aᵏ, R�
 end
 
 """
-#
+    LayerNormRule()
+
+LRP-LN rule. Used on `LayerNorm` layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_i^k = \\sum_j\\frac{a_i^k\\left(\delta_{ij} - 1/N\\right)}{\\sum_l a_l^k\\left(\delta_{lj}-1/N\\right)} R_j^{k+1}
+```
+Relevance through the affine transformation is by default propagated using the LRP-``0`` Rule (`ZeroRule()`). 
+If you would like to assign a special rule to the affine transformation, you can call `canonize` on your model first,
+which will split the `LayerNorm` layer into a `LayerNorm` part (without affine transformation) 
+and a `Scale` part (doing the transformation).
+You can now decide which Rule to use on the `Scale` part.
+
+# References
+- $REF_ALI_TRANSFORMER
 """
 struct LayerNormRule <: AbstractLRPRule end
 is_compatible(::LayerNormRule, ::LayerNorm) = true
