@@ -75,8 +75,8 @@ function canonize_split(model::Chain)
         if is_splittable(l)
             splitted = split_layer(l)
             model = Chain(model[1:(i - 1)]..., splitted..., model[(i + 1):end]...)
-            # if fused, don't increment i,
-            # instead try fusing the new layer with the next one
+            # if splitted, don't increment i,
+            # instead try splitting the first "sublayer" again
         else
             i += 1
         end
