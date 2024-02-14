@@ -533,7 +533,7 @@ Relevance through the affine transformation is by default propagated using the L
 If you would like to assign a special rule to the affine transformation, you can call `canonize` on your model first,
 which will split the `LayerNorm` layer into a `LayerNorm` part (without affine transformation) 
 and a `Scale` part (doing the transformation).
-You can now decide which Rule to use on the `Scale` part.
+You can then decide which Rule to use on the `Scale` part.
 
 # References
 - $REF_ALI_TRANSFORMER
