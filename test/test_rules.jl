@@ -72,22 +72,6 @@ const RULES = Dict(
     R̂ᵏ = similar(aᵏ) # will be inplace updated
     @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
-
-    ## LayerNorm layer
-    Rᵏ⁺¹ = reshape(repeat([1/3 1/3; 2/3 2/3], 4), 2, 2, 2, 2)
-    aᵏ = reshape(repeat([1.0, 2.0]; inner=(2, 2, 2)), 2, 2, 2, 2)
-    w = [-2.0, 2.0]
-    b = [1.0, -3.0]
-    Rᵏ = reshape(hcat([[2/15 2/45; 172/45 -188/45]' for _ in 1:4]...), 2, 2, 2, 2) # expected output
-
-    layer = LayerNorm(2, 2, relu; eps=0)
-    layer.diag.scale .= w
-    layer.diag.bias .= b
-    modified_layer = modify_layer(rule, layer)
-
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
-    @test R̂ᵏ ≈ Rᵏ
 end
 
 @testset "Parallel and SkipConnection analytic" begin

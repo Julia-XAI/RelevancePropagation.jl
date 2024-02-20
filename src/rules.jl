@@ -568,10 +568,6 @@ function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, R�
     @. Rᵏ = aᵏ * (s - μₛ)
 end
 
-function lrp!(Rᵏ, ::ZeroRule, layer::LayerNorm, modified_layer, aᵏ, Rᵏ⁺¹)
-    lrp!(Rᵏ, LayerNormRule(), layer, modified_layer, aᵏ, Rᵏ⁺¹)
-end
-
 #=========================#
 # Perfomance improvements #
 #=========================#
