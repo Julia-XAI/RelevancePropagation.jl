@@ -7,10 +7,10 @@ using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
 using MacroTools: @forward
 using Flux
-import Flux: Scale, normalise
+using Flux: Scale, normalise
 using Zygote
 using Markdown
-import Statistics: mean, std
+using Statistics: mean, std
 
 include("bibliography.jl")
 include("layer_types.jl")
