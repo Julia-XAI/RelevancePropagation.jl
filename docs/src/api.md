@@ -54,6 +54,7 @@ ZPlusRule
 ZBoxRule
 PassRule
 GeneralizedGammaRule
+LayerNormRule
 ```
 
 ## Composites

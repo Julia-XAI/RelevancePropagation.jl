@@ -529,11 +529,14 @@ Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input accor
 ```math
 R_i^k = \\sum_j\\frac{a_i^k\\left(\\delta_{ij} - 1/N\\right)}{\\sum_l a_l^k\\left(\\delta_{lj}-1/N\\right)} R_j^{k+1}
 ```
-Relevance through the affine transformation is by default propagated using the LRP-``0`` Rule (`ZeroRule()`). 
-If you would like to assign a special rule to the affine transformation, you can call `canonize` on your model first,
-which will split the `LayerNorm` layer into a `LayerNorm` part (without affine transformation) 
-and a `Scale` part (doing the transformation).
-You can then decide which Rule to use on the `Scale` part.
+Relevance through the affine transformation is by default propagated using the [`ZeroRule`](@ref).
+
+If you would like to assign a special rule to the affine transformation inside of the `LayerNorm` layer,
+call `canonize` on your model.
+This will split the `LayerNorm` layer into
+1. a `LayerNorm` layer without affine transformation
+2. a `Scale` layer implementing the affine transformation
+You can then assign separate rules to these two layers.
 
 # References
 - $REF_ALI_TRANSFORMER
@@ -556,7 +559,7 @@ function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, R�
     eps = convert(float(eltype(aᵏ)), layer_norm.ϵ)
     n_dims = 1:length(layer_norm.size)
     μₐ = mean(aᵏ; dims=n_dims)
-    # forward pass: compute normalized inputs aᵏ ->(normalize) aᵏₙ 
+    # forward pass: compute normalized inputs aᵏ ->(normalize) aᵏₙ
     z = aᵏ .- μₐ
     σ = std(aᵏ; dims=n_dims, mean=μₐ, corrected=false)
     aᵏₙ = @. z / (σ + eps)
