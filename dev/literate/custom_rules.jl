@@ -10,6 +10,7 @@
 
 # We start out by loading the same pre-trained LeNet-5 model and MNIST input data:
 using RelevancePropagation
+using VisionHeatmaps
 using Flux
 using MLDatasets
 using ImageCore
@@ -63,7 +64,8 @@ rules = [
     ZeroRule(),
 ]
 analyzer = LRP(model, rules)
-heatmap(input, analyzer)
+
+heatmap(input, analyzer) # using VisionHeatmaps.jl
 
 # We just implemented our own version of the ``γ``-rule in 2 lines of code.
 # The heatmap perfectly matches the pre-implemented `GammaRule`:

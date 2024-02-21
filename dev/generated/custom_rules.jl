@@ -1,4 +1,5 @@
 using RelevancePropagation
+using VisionHeatmaps
 using Flux
 using MLDatasets
 using ImageCore
@@ -27,7 +28,8 @@ rules = [
     ZeroRule(),
 ]
 analyzer = LRP(model, rules)
-heatmap(input, analyzer)
+
+heatmap(input, analyzer) # using VisionHeatmaps.jl
 
 rules = [
     ZPlusRule(),

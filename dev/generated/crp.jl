@@ -23,6 +23,8 @@ features = TopNFeatures(5)
 
 features = IndexedFeatures(1, 2, 10)
 
+using VisionHeatmaps
+
 analyzer = CRP(lrp_analyzer, feature_layer, features)
 heatmap(input, analyzer)
 

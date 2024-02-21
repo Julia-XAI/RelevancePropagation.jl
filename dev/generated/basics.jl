@@ -38,6 +38,8 @@ convert2image(MNIST, x)
 
 analyzer = LRP(model)
 
+using VisionHeatmaps
+
 heatmap(input, analyzer)
 
 composite = EpsilonPlusFlat() # using composite preset EpsilonPlusFlat
