@@ -32,7 +32,7 @@ end
 # Call to CRP analyzer #
 #======================#
 
-function (crp::CRP)(input::AbstractArray{T,N}, ns::AbstractNeuronSelector) where {T,N}
+function (crp::CRP)(input::AbstractArray{T,N}, ns::AbstractOutputSelector) where {T,N}
     rules = crp.lrp.rules
     layers = crp.lrp.model.layers
     modified_layers = crp.lrp.modified_layers

@@ -56,7 +56,7 @@ LRP(model::Chain, c::Composite; kwargs...) = LRP(model, lrp_rules(model, c); kwa
 #==========================#
 
 function (lrp::LRP)(
-    input::AbstractArray, ns::AbstractNeuronSelector; layerwise_relevances=false
+    input::AbstractArray, ns::AbstractOutputSelector; layerwise_relevances=false
 )
     as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
     Rs = similar.(as)                         # allocate relevances Rᵏ for all layers k
@@ -69,7 +69,7 @@ end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)
 
-function mask_output_neuron!(R_out, a_out, ns::AbstractNeuronSelector)
+function mask_output_neuron!(R_out, a_out, ns::AbstractOutputSelector)
     fill!(R_out, 0)
     idx = ns(a_out)
     R_out[idx] .= 1
