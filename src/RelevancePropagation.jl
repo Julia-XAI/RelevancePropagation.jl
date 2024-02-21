@@ -7,8 +7,10 @@ using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
 using MacroTools: @forward
 using Flux
+using Flux: Scale, normalise
 using Zygote
 using Markdown
+using Statistics: mean, std
 
 include("compat.jl")
 include("bibliography.jl")
@@ -34,6 +36,7 @@ export AbstractLRPRule
 export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
+export LayerNormRule
 
 # LRP composites
 export Composite, AbstractCompositePrimitive
