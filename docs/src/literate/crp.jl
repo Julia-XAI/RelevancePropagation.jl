@@ -46,6 +46,8 @@ features = IndexedFeatures(1, 2, 10)
 # ## Step 3: Use CRP analyzer
 # We can now create a [`CRP`](@ref) analyzer
 # and use it like any other analyzer from RelevancePropagation.jl:
+using VisionHeatmaps
+
 analyzer = CRP(lrp_analyzer, feature_layer, features)
 heatmap(input, analyzer)
 

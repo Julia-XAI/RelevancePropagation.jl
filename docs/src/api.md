@@ -4,8 +4,13 @@ All methods in RelevancePropagation.jl work by calling `analyze` on an input and
 ```@docs
 analyze
 Explanation
-heatmap
 ```
+
+For heatmapping functionality, take a look at either
+[VisionHeatmaps.jl](https://julia-xai.github.io/XAIDocs/VisionHeatmaps/stable/) or
+[TextHeatmaps.jl](https://julia-xai.github.io/XAIDocs/TextHeatmaps/stable/).
+Both provide `heatmap` methods for visualizing explanations, 
+either for images or text, respectively.
 
 ## LRP analyzer
 ```@docs
