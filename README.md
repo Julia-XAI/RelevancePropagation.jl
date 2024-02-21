@@ -25,6 +25,7 @@ using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Me
 
 ```julia
 using RelevancePropagation
+using VisionHeatmaps             # visualization of explanations as heatmaps
 using Flux
 using Metalhead                  # pre-trained vision models
 
@@ -40,7 +41,7 @@ input = ...                      # input in WHCN format
 composite = EpsilonPlusFlat()
 analyzer = LRP(model, composite)
 expl = analyze(input, analyzer)  # or: expl = analyzer(input)
-heatmap(expl)                    # Show heatmap
+heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
 
 ```
 
@@ -63,8 +64,6 @@ whereas regions in blue are of negative relevance.
 | `LRP` with `EpsilonAlpha2Beta1Flat` composite | ![][castle-lrp-eabf]           | ![][streetsign-lrp-eabf]           |
 | `LRP` with `EpsilonGammaBox` composite        | ![][castle-lrp-egb]            | ![][streetsign-lrp-egb]            |
 | `LRP`                                         | ![][castle-lrp]                | ![][streetsign-lrp]                |
-
-
 
 ## Acknowledgements
 > Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF) 
