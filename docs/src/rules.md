@@ -44,6 +44,7 @@ ZBoxRule
 ```
 
 ## Specialized rules
-```@docs; canonical=false 
+```@docs; canonical=false
+LayerNormRule
 GeneralizedGammaRule
 ```
