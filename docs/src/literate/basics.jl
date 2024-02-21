@@ -100,7 +100,12 @@ convert2image(MNIST, x)
 analyzer = LRP(model)
 
 # This ana lyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
-# from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl):
+# from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
+# We can visualize `Explanation`s by computing a `heatmap` using either
+# [VisionHeatmaps.jl](https://julia-xai.github.io/XAIDocs/VisionHeatmaps/stable/) or
+# [TextHeatmaps.jl](https://julia-xai.github.io/XAIDocs/TextHeatmaps/stable/),
+# either for images or text, respectively.
+using VisionHeatmaps
 
 heatmap(input, analyzer)
 
