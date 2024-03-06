@@ -58,12 +58,12 @@ whereas regions in blue are of negative relevance.
 
 | **Analyzer**                                  | **Heatmap for class "castle"** |**Heatmap for class "street sign"** |
 |:--------------------------------------------- |:------------------------------:|:----------------------------------:|
-| `LRP` with `EpsilonPlus` composite            | ![][castle-lrp-ep]             | ![][streetsign-lrp-ep]              |
+| `LRP` with `EpsilonPlus` composite            | ![][castle-lrp-ep]             | ![][streetsign-lrp-ep]             |
 | `LRP` with `EpsilonPlusFlat` composite        | ![][castle-lrp-epf]            | ![][streetsign-lrp-epf]            |
 | `LRP` with `EpsilonAlpha2Beta1` composite     | ![][castle-lrp-eab]            | ![][streetsign-lrp-eab]            |
 | `LRP` with `EpsilonAlpha2Beta1Flat` composite | ![][castle-lrp-eabf]           | ![][streetsign-lrp-eabf]           |
 | `LRP` with `EpsilonGammaBox` composite        | ![][castle-lrp-egb]            | ![][streetsign-lrp-egb]            |
-| `LRP`                                         | ![][castle-lrp]                | ![][streetsign-lrp]                |
+| `LRP` with `ZeroRule` (discouraged)           | ![][castle-lrp]                | ![][streetsign-lrp]                |
 
 ## Acknowledgements
 > Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF) 
