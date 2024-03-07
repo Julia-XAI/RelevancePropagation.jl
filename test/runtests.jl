@@ -6,6 +6,7 @@ using Random
 
 using RelevancePropagation
 using Flux
+import Flux: Scale
 
 pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 

@@ -14,6 +14,7 @@ end
 for T in (Conv, ConvTranspose, CrossCor)
     @test activation_fn(T((5, 5), 3 => 2, softplus)) == softplus
 end
+@test activation_fn(Scale([1.0, 2.0, 3.0], false, relu)) == relu
 @test isnothing(activation_fn(flatten))
 
 # copy_layer

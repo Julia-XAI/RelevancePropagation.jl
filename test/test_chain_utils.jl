@@ -1,5 +1,5 @@
 using RelevancePropagation: ChainTuple, ParallelTuple, SkipConnectionTuple
-using RelevancePropagation: ModelIndex, chainmap, chainindices
+using RelevancePropagation: ModelIndex, chainmap, chainindices, chainzip
 using RelevancePropagation: activation_fn
 using Flux
 
@@ -71,3 +71,20 @@ const MI = ModelIndex
 @test ModelIndex(1, 2) ∈ ModelIndex(1, 2)
 @test ModelIndex(1, 2, 3) ∈ ModelIndex(1, 2)
 @test ModelIndex(1, 2) ∉ ModelIndex(1, 2, 3)
+
+# Test chainzip
+t1 = ChainTuple(1, 2, 3)
+t2 = ChainTuple(4, 5, 6)
+t3 = ChainTuple(7, 8, 9)
+@test chainzip(+, t1, t2) == ChainTuple(5, 7, 9)
+@test chainzip(+, t1, t2, t3) == ChainTuple(12, 15, 18)
+@test chainzip(*, t1, t2, t3) == ChainTuple(28, 80, 162)
+
+@test chainzip(
+    +,
+    ChainTuple(1, ChainTuple(ParallelTuple(2, ChainTuple(3)))),
+    ChainTuple(4, ChainTuple(ParallelTuple(5, ChainTuple(6)))),
+) == ChainTuple(5, ChainTuple(ParallelTuple(7, ChainTuple(9))))
+
+@test_throws ErrorException chainzip(+, t1, ChainTuple(1, 2))
+@test_throws ErrorException chainzip(+, t1, ParallelTuple(1, 2, 3))

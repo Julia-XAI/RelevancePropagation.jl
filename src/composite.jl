@@ -37,10 +37,11 @@ in nested Flux `Chain`s.
 
 See [`show_layer_indices`](@ref) to print layer indices and [`Composite`](@ref) for an example.
 """
-struct LayerMap{I<:Union{Integer,Tuple},R<:AbstractLRPRule} <: AbstractCompositeMap
+struct LayerMap{I<:ModelIndex,R<:AbstractLRPRule} <: AbstractCompositeMap
     index::I
     rule::R
 end
+LayerMap(inds::Union{Integer,Tuple}, rule) = LayerMap(ModelIndex(inds), rule)
 
 """
     RangeMap(range, rule)
@@ -177,7 +178,7 @@ function lrp_rules(model, c::Composite)
     idx_first = first_element(indices)
     idx_last = last_element(indices)
 
-    get_rule(r::LayerMap, _, idx) = ifelse(idx ∈ ModelIndex(r.index), r.rule, nothing)
+    get_rule(r::LayerMap, _, idx) = ifelse(idx ∈ r.index, r.rule, nothing)
     get_rule(r::GlobalMap, _, _idx) = r.rule
     get_rule(r::RangeMap, _, idx) = ifelse(first(idx) ∈ r.range, r.rule, nothing)
     get_rule(r::FirstLayerMap, _, idx) = ifelse(idx == idx_first, r.rule, nothing)

@@ -12,6 +12,8 @@ function EpsilonGammaBox(low, high; epsilon=1.0f-6, gamma=0.25f0)
         GlobalTypeMap(
             ConvLayer          => GammaRule(gamma),
             Dense              => EpsilonRule(epsilon),
+            Scale              => EpsilonRule(epsilon),
+            LayerNorm          => LayerNormRule(),
             DropoutLayer       => PassRule(),
             NormalizationLayer => PassRule(),
             ReshapingLayer     => PassRule(),
@@ -35,6 +37,8 @@ function EpsilonPlus(; epsilon=1.0f-6)
         GlobalTypeMap(
             ConvLayer          => ZPlusRule(),
             Dense              => EpsilonRule(epsilon),
+            Scale              => EpsilonRule(epsilon),
+            LayerNorm          => LayerNormRule(),
             DropoutLayer       => PassRule(),
             NormalizationLayer => PassRule(),
             ReshapingLayer     => PassRule(),
@@ -57,6 +61,8 @@ function EpsilonAlpha2Beta1(; epsilon=1.0f-6)
         GlobalTypeMap(
             ConvLayer          => AlphaBetaRule(2.0f0, 1.0f0),
             Dense              => EpsilonRule(epsilon),
+            Scale              => EpsilonRule(epsilon),
+            LayerNorm          => LayerNormRule(),
             DropoutLayer       => PassRule(),
             NormalizationLayer => PassRule(),
             ReshapingLayer     => PassRule(),
@@ -79,6 +85,8 @@ function EpsilonPlusFlat(; epsilon=1.0f-6)
         GlobalTypeMap(
             ConvLayer          => ZPlusRule(),
             Dense              => EpsilonRule(epsilon),
+            Scale              => EpsilonRule(epsilon),
+            LayerNorm          => LayerNormRule(),
             DropoutLayer       => PassRule(),
             NormalizationLayer => PassRule(),
             ReshapingLayer     => PassRule(),
@@ -102,6 +110,8 @@ function EpsilonAlpha2Beta1Flat(; epsilon=1.0f-6)
         GlobalTypeMap(
             ConvLayer          => AlphaBetaRule(2.0f0, 1.0f0),
             Dense              => EpsilonRule(epsilon),
+            Scale              => EpsilonRule(epsilon),
+            LayerNorm          => LayerNormRule(),
             DropoutLayer       => PassRule(),
             NormalizationLayer => PassRule(),
             ReshapingLayer     => PassRule(),

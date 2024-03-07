@@ -1,4 +1,4 @@
-# # [Assigning LRP Rules to Layers](@id docs-composites)
+# # [Assigning LRP Rules to Layers](@id composites)
 # In this example, we will show how to assign LRP rules to specific layers.
 # For this purpose, we first define a small VGG-like convolutional neural network:
 using RelevancePropagation
@@ -16,7 +16,7 @@ model = Chain(
     Chain(Flux.flatten, Dense(1024 => 512, relu), Dropout(0.5), Dense(512 => 100, relu)),
 );
 
-# ## [Manually assigning rules](@id docs-composites-manual)
+# ## [Manually assigning rules](@id composites-manual)
 # When creating an LRP-analyzer, we can assign individual rules to each layer.
 # As we can see above, our model is a `Chain` of two Flux `Chain`s.
 # Using [`flatten_model`](@ref), we can flatten the model into a single `Chain`:
@@ -58,7 +58,7 @@ analyzer = LRP(model, rules; flatten=false)
 #md #     that the structure of the model can be preserved.
 #md #     For performance reasons, the default `flatten=true` is recommended.
 
-# ## [Custom composites](@id docs-composites-custom)
+# ## Custom composites
 # Instead of manually defining a list of rules, we can also define a [`Composite`](@ref).
 # A composite constructs a list of LRP-rules by sequentially applying the
 # [composite primitives](@ref api-composite-primitives) it contains.
@@ -119,7 +119,7 @@ LRP(model, composite; flatten=false)
 
 # This approach also works with `Parallel` layers.
 
-# ## [Composite presets](@id docs-composites-presets)
+# ## [Composite presets](@id composites-presets)
 # RelevancePropagation.jl provides a set of default composites.
 # A list of all implemented default composites can be found
 # [in the API reference](@ref api-composite-presets),

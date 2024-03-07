@@ -127,13 +127,13 @@ function modify_layer(rule, layer; keep_bias=true)
     !is_compatible(rule, layer) && throw(LRPCompatibilityError(rule, layer))
     !has_weight_and_bias(layer) && return layer
 
-    weight = modify_weight(rule, layer.weight)
-    bias = if layer.bias == false
+    weight = modify_weight(rule, get_weight(layer))
+    bias = if get_bias(layer) == false
         false
     elseif !keep_bias
-        zero(layer.bias)
+        zero(get_bias(layer))
     else
-        modify_bias(rule, layer.bias)
+        modify_bias(rule, get_bias(layer))
     end
     return copy_layer(layer, weight, bias)
 end
@@ -213,6 +213,7 @@ struct GammaRule{T<:Real} <: AbstractLRPRule
     γ::T
     GammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
 end
+is_compatible(rule::GammaRule, layer::Scale) = true
 function modify_parameters(r::GammaRule, param::AbstractArray)
     γ = convert(eltype(param), r.γ)
     return @. param + γ * keep_positive(param)
@@ -516,6 +517,58 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer, modified_layers, aᵏ, R�
     cʳ⁺ = only(back⁺(sʳ))
     cʳ⁻ = only(back⁻(sʳ))
     @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
+end
+
+"""
+    LayerNormRule()
+
+LRP-LN rule. Used on `LayerNorm` layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_i^k = \\sum_j\\frac{a_i^k\\left(\\delta_{ij} - 1/N\\right)}{\\sum_l a_l^k\\left(\\delta_{lj}-1/N\\right)} R_j^{k+1}
+```
+Relevance through the affine transformation is by default propagated using the [`ZeroRule`](@ref).
+
+If you would like to assign a special rule to the affine transformation inside of the `LayerNorm` layer,
+call `canonize` on your model.
+This will split the `LayerNorm` layer into
+1. a `LayerNorm` layer without affine transformation
+2. a `Scale` layer implementing the affine transformation
+You can then assign separate rules to these two layers.
+
+# References
+- $REF_ALI_TRANSFORMER
+"""
+struct LayerNormRule <: AbstractLRPRule end
+is_compatible(::LayerNormRule, ::LayerNorm) = true
+
+function lrp!(
+    Rᵏ, ::LayerNormRule, layer::LayerNorm{F,D}, _modified_layer, aᵏ, Rᵏ⁺¹
+) where {F,D<:typeof(identity)}
+    n_dims = 1:length(layer.size)
+    μₐ = mean(aᵏ; dims=n_dims)
+    s = @. Rᵏ⁺¹ / stabilize_denom(aᵏ - μₐ, LRP_DEFAULT_STABILIZER)
+    μₛ = mean(s; dims=n_dims)
+    @. Rᵏ = aᵏ * (s - μₛ)
+end
+
+function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, Rᵏ⁺¹)
+    layer_norm, scale = split_layer(layer)
+    eps = convert(float(eltype(aᵏ)), layer_norm.ϵ)
+    n_dims = 1:length(layer_norm.size)
+    μₐ = mean(aᵏ; dims=n_dims)
+    # forward pass: compute normalized inputs aᵏ ->(normalize) aᵏₙ
+    z = aᵏ .- μₐ
+    σ = std(aᵏ; dims=n_dims, mean=μₐ, corrected=false)
+    aᵏₙ = @. z / (σ + eps)
+    # call ZeroRule on affine part as a fallback when model is not canonized
+    lrp!(Rᵏ, ZeroRule(), scale, modify_layer(ZeroRule(), scale), aᵏₙ, Rᵏ⁺¹)
+    # compute LRP pass through normalization
+    s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
+    μₛ = mean(s; dims=n_dims)
+    @. Rᵏ = aᵏ * (s - μₛ)
 end
 
 #=========================#

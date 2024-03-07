@@ -156,11 +156,16 @@ function chainzip(f, xs...)
     if all(isleaf, xs)
         return f(xs...)
     else
-        constructors = constructor.(xs)
-        T = first(constructors)
-        # Assume that arguments xs are zippable if constructors match:
-        all(c -> c == T, constructors) || error("Cannot chainzip arguments $xs.")
-        vals = chainzip.(f, children.(xs)...)
+        Ts = constructor.(xs)
+        allequal(Ts) || error("Cannot chainzip arguments of different container types $Ts.")
+
+        cs = children.(xs)
+        lens = length.(cs)
+        allequal(lens) ||
+            error("Cannot chainzip arguments $xs of different lengths: $lens.")
+
+        T = first(Ts)
+        vals = chainzip.(f, cs...)
         return T(vals...)
     end
 end

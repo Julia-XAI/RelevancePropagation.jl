@@ -57,7 +57,7 @@ LRP(model::Chain, c::Composite; kwargs...) = LRP(model, lrp_rules(model, c); kwa
 
 function (lrp::LRP)(
     input::AbstractArray, 
-    ns::AbstractNeuronSelector; 
+    ns::AbstractOutputSelector; 
     layerwise_relevances=false, 
     normalize_output=true,
     R = nothing
@@ -76,7 +76,7 @@ end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)
 
-function mask_output_neuron!(R_out, a_out, ns::AbstractNeuronSelector; normalize_output=true)
+function mask_output_neuron!(R_out, a_out, ns::AbstractOutputSelector; normalize_output=true)
     fill!(R_out, 0)
     idx = ns(a_out)
     if normalize_output

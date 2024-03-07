@@ -8,7 +8,9 @@ struct ModelIndex{N}
 end
 ModelIndex(inds...) = ModelIndex(tuple(inds...))
 append(idx::ModelIndex, i) = ModelIndex(idx.inds..., i)
-Base.show(io::IO, idx::ModelIndex) = Base.show(io, idx.inds)
+
+Base.show(io::IO, mi::ModelIndex) = Base.show(io, mi.inds)
+Base.show(io::IO, mi::ModelIndex{1}) = Base.show(io, only(mi.inds))
 
 Base.:(==)(a::ModelIndex, b::ModelIndex) = a.inds == b.inds
 @forward ModelIndex.inds Base.getindex,
