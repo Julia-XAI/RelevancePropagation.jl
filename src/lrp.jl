@@ -56,12 +56,19 @@ LRP(model::Chain, c::Composite; kwargs...) = LRP(model, lrp_rules(model, c); kwa
 #==========================#
 
 function (lrp::LRP)(
-    input::AbstractArray, ns::AbstractNeuronSelector; layerwise_relevances=false
+    input::AbstractArray, 
+    ns::AbstractNeuronSelector; 
+    layerwise_relevances=false, 
+    normalize_output=true,
+    R = nothing
 )
     as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
-    Rs = similar.(as)                         # allocate relevances Rᵏ for all layers k
-    mask_output_neuron!(Rs[end], as[end], ns) # compute relevance Rᴺ of output layer N
-
+    Rs = similar.(as)
+    if isnothing(R)                         # allocate relevances Rᵏ for all layers k
+        mask_output_neuron!(Rs[end], as[end], ns; normalize_output=normalize_output) # compute relevance Rᴺ of output layer N
+    else
+        Rs[end] .= R
+    end
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
     return Explanation(first(Rs), last(as), ns(last(as)), :LRP, :attribution, extras)
@@ -69,10 +76,14 @@ end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)
 
-function mask_output_neuron!(R_out, a_out, ns::AbstractNeuronSelector)
+function mask_output_neuron!(R_out, a_out, ns::AbstractNeuronSelector; normalize_output=true)
     fill!(R_out, 0)
     idx = ns(a_out)
-    R_out[idx] .= 1
+    if normalize_output
+        R_out[idx] .= 1
+    else
+        R_out[idx] .= a_out[idx]
+    end
     return R_out
 end
 
