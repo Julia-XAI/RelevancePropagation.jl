@@ -18,7 +18,7 @@ Metalhead = "dbeba491-748d-5e0e-a39e-b530a07fa0cc"
 NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 
 [extensions]
-VisionTransformerExt = "Metalhead, NNlib"
+VisionTransformerExt = ["Metalhead", "NNlib"]
 
 [compat]
 Flux = "0.13, 0.14"
@@ -30,3 +30,5 @@ Statistics = "1"
 XAIBase = "3"
 Zygote = "0.6"
 julia = "1.6"
+Metalhead = "0.9"
+NNlib = "0.9"
