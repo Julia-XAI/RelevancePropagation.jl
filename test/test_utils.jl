@@ -34,6 +34,7 @@ end
 ) == Chain(Parallel(+, Chain(identity), Chain(identity)))
 @test flatten_model(Chain(Chain(SkipConnection(Chain(Chain(identity)), +)))) ==
     Chain(SkipConnection(Chain(identity), +))
+@test flatten_model(Chain(Chain(Dense(5 => 5), BatchNorm(5)))).layers isa Tuple
 
 # has_output_softmax
 @test has_output_softmax(Chain(abs, sqrt, relu, softmax)) == true
