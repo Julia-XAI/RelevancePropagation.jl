@@ -1,9 +1,8 @@
 module VisionTransformerExt
-using RelevancePropagation, Metalhead, Flux
-using RelevancePropagation:
-    SelectClassToken, SelfAttentionRule, PositionalEmbeddingRule, REF_ALI_TRANSFORMER
-import RelevancePropagation: prepare_vit
-using Metalhead: ViPosEmbedding, ClassTokens, MultiHeadSelfAttention, chunk
+using RelevancePropagation, Flux
+using RelevancePropagation: SelfAttentionRule, SelectClassToken, PositionalEmbeddingRule, modify_layer # all used types have to be used explicitely
+import RelevancePropagation: prepare_vit, is_compatible, lrp! # all functions to which you want to add methods have to be imported
+using Metalhead: ViPosEmbedding, ClassTokens, MultiHeadSelfAttention, chunk, ViT
 using Metalhead.Layers: _flatten_spatial
 using NNlib: split_heads, join_heads
 
