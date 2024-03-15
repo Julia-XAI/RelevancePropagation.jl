@@ -42,12 +42,15 @@ function split_layer(l::LayerNorm)
         diag = Scale(1, l.λ; bias=false)
         diag.scale .= 1.0
     end
-    return (layer_norm, diag)
+    return Chain(layer_norm, diag)
 end
 
 is_splittable(l::LayerNorm) = true
 is_splittable(l::LayerNorm{F,D,T,N}) where {F,D<:typeof(identity),T,N} = false # don't split any further if the affine part is already the identity
 is_splittable(l) = false
+
+# fallback
+split_layer(layer) = layer
 
 #=================================#
 # Canonize model (split and fuse) #
@@ -88,7 +91,11 @@ function canonize_split(p::Parallel)
     return Parallel(p.connection, canonize_split.(p.layers))
 end
 
-canonize_split(layer) = layer
+function canonize_split(s::SkipConnection)
+    return SkipConnection(canonize_split(s.layers), s.connection)
+end
+
+canonize_split(layer) = split_layer(layer)
 
 function canonize_fuse(model::Chain)
     model = Chain(canonize_fuse.(model.layers)) # recursively canonize Parallel layers
@@ -111,6 +118,10 @@ end
 
 function canonize_fuse(p::Parallel)
     return Parallel(p.connection, canonize_fuse.(p.layers))
+end
+
+function canonize_fuse(s::SkipConnection)
+    return SkipConnection(canonize_fuse(s.layers), s.connection)
 end
 
 canonize_fuse(layer) = layer
