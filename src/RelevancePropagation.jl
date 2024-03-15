@@ -27,6 +27,7 @@ include("lrp.jl")
 include("show.jl")
 include("composite_presets.jl") # uses show.jl
 include("crp.jl")
+include("extensions.jl")
 
 export LRP
 export CRP
@@ -36,7 +37,7 @@ export AbstractLRPRule
 export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
-export LayerNormRule
+export LayerNormRule, PositionalEmbeddingRule, SelfAttentionRule
 
 # LRP composites
 export Composite, AbstractCompositePrimitive
@@ -53,6 +54,6 @@ export EpsilonAlpha2Beta1Flat
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
 
 # utils
-export strip_softmax, flatten_model, canonize
+export strip_softmax, flatten_model, canonize, prepare_vit
 
 end # module
