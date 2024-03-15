@@ -187,21 +187,15 @@ flatten_model(x) = chainflatten(x)
 Flatten a Flux `Chain` containing `Chain`s. Also works with `ChainTuple`s.
 """
 function chainflatten(c::Chain)
-    if length(c.layers) == 1
-        return Chain(_chainflatten(c))
-    else
-        return Chain(_chainflatten(c)...)
-    end
+    return Chain(_chainflatten(c)...)
 end
+
 function chainflatten(c::ChainTuple)
-    if length(c.vals) == 1
-        return ChainTuple(_chainflatten(c))
-    else
-        return ChainTuple(_chainflatten(c)...)
-    end
+    return ChainTuple(_chainflatten(c)...)
 end
-_chainflatten(c::Chain)      = mapreduce(_chainflatten, vcat, c.layers)
-_chainflatten(c::ChainTuple) = mapreduce(_chainflatten, vcat, c.vals)
+
+_chainflatten(c::Chain)      = mapreduce(_chainflatten, vcat, c.layers; init=[])
+_chainflatten(c::ChainTuple) = mapreduce(_chainflatten, vcat, c.vals; init=[])
 
 chainflatten(p::Parallel)       = _chainflatten(p)
 chainflatten(p::ParallelTuple)  = _chainflatten(p)

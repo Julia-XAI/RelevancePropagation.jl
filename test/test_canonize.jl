@@ -135,3 +135,52 @@ model_canonized = canonize(model)
 @test length(model_canonized[2][2]) == 1
 @test length(model_canonized[2][3]) == 2
 @test model(x) ≈ model_canonized(x)
+
+#=======================================================#
+# Test `canonize` on  models w/ SkipConnection layers   #
+# and with layers that have to be split (LayerNorm)     #
+#=======================================================#
+x = pseudorand(5, batchsize)
+
+model = Chain(
+    LayerNorm(5), # split
+    Parallel(
+        +,
+        LayerNorm(5), # split
+        Chain(
+            Dense(5 => 5), # fuse
+            BatchNorm(5),
+        ),
+        Chain(
+            LayerNorm(5), # split
+        ),
+    ),
+    SkipConnection(
+        LayerNorm(5), # split
+        +,
+    ),
+    SkipConnection(Chain(
+        LayerNorm(5),
+        Dense(5 => 5), # split
+    ), +),
+    SkipConnection(Chain(
+        Dense(5 => 5), # split
+        BatchNorm(5),
+    ), +),
+    Dense(5 => 5), # fuse
+    BatchNorm(5),
+)
+
+Flux.testmode!(model, false)
+model(x)
+Flux.testmode!(model, true)
+model_canonized = canonize(model)
+
+@test length(model_canonized) == 7
+@test length(model_canonized[3][1]) == 2
+@test length(model_canonized[3][2]) == 1
+@test length(model_canonized[3][3]) == 2
+@test length(model_canonized[4].layers) == 2
+@test length(model_canonized[5].layers) == 3
+@test length(model_canonized[6].layers) == 1
+@test model(x) ≈ model_canonized(x)
