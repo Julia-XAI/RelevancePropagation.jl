@@ -41,9 +41,10 @@ Combining [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTupl
 data `xs` can be stored while preserving the structure of a Flux model
 without risking type piracy.
 """
-struct SkipConnectionTuple{T<:Tuple}
+struct SkipConnectionTuple{T}
     vals::T
 end
+SkipConnectionTuple(xs::Tuple) = SkipConnectionTuple(ChainTuple(xs))
 
 for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
     name = string(T)
@@ -102,11 +103,11 @@ constructor(::SkipConnection)      = SkipConnectionTuple
 constructor(::SkipConnectionTuple) = SkipConnectionTuple
 
 children(c::Chain)               = c.layers
-children(p::Parallel)            = p.layers
-children(s::SkipConnection)      = (s.layers,)
 children(c::ChainTuple)          = c.vals
+children(p::Parallel)            = p.layers
 children(p::ParallelTuple)       = p.vals
-children(s::SkipConnectionTuple) = s.vals
+children(s::SkipConnection)      = (s.layers,)
+children(s::SkipConnectionTuple) = (s.vals,)
 
 """
     chainmap(f, x)
