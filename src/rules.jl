@@ -555,7 +555,7 @@ function lrp!(
 end
 
 function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, Rᵏ⁺¹)
-    layer_norm, scale = split_layer(layer)
+    layer_norm, scale = split_layernorm(layer)
     eps = convert(float(eltype(aᵏ)), layer_norm.ϵ)
     n_dims = 1:length(layer_norm.size)
     μₐ = mean(aᵏ; dims=n_dims)

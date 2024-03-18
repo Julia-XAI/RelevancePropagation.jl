@@ -41,9 +41,10 @@ Combining [`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTupl
 data `xs` can be stored while preserving the structure of a Flux model
 without risking type piracy.
 """
-struct SkipConnectionTuple{T<:Tuple}
+struct SkipConnectionTuple{T}
     vals::T
 end
+SkipConnectionTuple(xs::Tuple) = SkipConnectionTuple(ChainTuple(xs))
 
 for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
     name = string(T)
@@ -102,11 +103,11 @@ constructor(::SkipConnection)      = SkipConnectionTuple
 constructor(::SkipConnectionTuple) = SkipConnectionTuple
 
 children(c::Chain)               = c.layers
-children(p::Parallel)            = p.layers
-children(s::SkipConnection)      = (s.layers,)
 children(c::ChainTuple)          = c.vals
+children(p::Parallel)            = p.layers
 children(p::ParallelTuple)       = p.vals
-children(s::SkipConnectionTuple) = s.vals
+children(s::SkipConnection)      = (s.layers,)
+children(s::SkipConnectionTuple) = (s.vals,)
 
 """
     chainmap(f, x)
@@ -186,35 +187,34 @@ flatten_model(x) = chainflatten(x)
 
 Flatten a Flux `Chain` containing `Chain`s. Also works with `ChainTuple`s.
 """
-function chainflatten(c::Chain)
-    if length(c.layers) == 1
-        return Chain(_chainflatten(c))
-    else
-        return Chain(_chainflatten(c)...)
-    end
-end
-function chainflatten(c::ChainTuple)
-    if length(c.vals) == 1
-        return ChainTuple(_chainflatten(c))
-    else
-        return ChainTuple(_chainflatten(c)...)
-    end
-end
-_chainflatten(c::Chain)      = mapreduce(_chainflatten, vcat, c.layers)
-_chainflatten(c::ChainTuple) = mapreduce(_chainflatten, vcat, c.vals)
+chainflatten(c::Chain) = Chain(chainflatten(c.layers)...)
+chainflatten(c::ChainTuple) = ChainTuple(chainflatten(c.vals)...)
 
-chainflatten(p::Parallel)       = _chainflatten(p)
-chainflatten(p::ParallelTuple)  = _chainflatten(p)
-_chainflatten(p::Parallel)      = Parallel(p.connection, chainflatten.(p.layers))
-_chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
+chainflatten(p::Parallel)      = Parallel(p.connection, chainflatten.(p.layers))
+chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
 
-chainflatten(s::SkipConnection)       = _chainflatten(s)
-chainflatten(s::SkipConnectionTuple)  = _chainflatten(s)
-_chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
-_chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
+chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
+chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
 
 chainflatten(x) = x
-_chainflatten(x) = x
+
+# Splat Chains, ChainTuples and Tuples using `append!`
+function chainflatten(layers::Tuple)
+    out = []
+    for l in layers
+        flat = chainflatten(l)
+        if flat isa Chain
+            append!(out, flat.layers)
+        elseif flat isa ChainTuple
+            append!(out, flat.vals)
+        elseif flat isa Tuple
+            append!(out, flat)
+        else
+            push!(out, flat)
+        end
+    end
+    return out
+end
 
 #=========================#
 # Strip output activation #

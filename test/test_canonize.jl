@@ -1,13 +1,13 @@
 using Flux
-using Flux: flatten
+using Flux: flatten, Scale
 using RelevancePropagation
-using RelevancePropagation: fuse_batchnorm
+using RelevancePropagation: canonize_fuse
 using Random
 
 batchsize = 50
 
-#======================================#
-# Test `fuse_batchnorm` on Dense layer #
+##=====================================#
+# Test `canonize_fuse` on Dense layer #
 #======================================#
 
 ins = 10
@@ -22,11 +22,11 @@ Flux.testmode!(model, false)
 model(x)
 Flux.testmode!(model, true)
 
-dense_fused = @inferred fuse_batchnorm(dense, bn_dense)
+dense_fused = @inferred canonize_fuse(dense, bn_dense)
 @test dense_fused(x) ≈ model(x)
 
-#=====================================#
-# Test `fuse_batchnorm` on Conv layer #
+##====================================#
+# Test `canonize_fuse` on Conv layer  #
 #=====================================#
 
 insize = (10, 10, 3)
@@ -40,10 +40,10 @@ Flux.testmode!(model, false)
 model(x)
 Flux.testmode!(model, true)
 
-conv_fused = @inferred fuse_batchnorm(conv, bn_conv)
+conv_fused = @inferred canonize_fuse(conv, bn_conv)
 @test conv_fused(x) ≈ model(x)
 
-#======================================#
+##=====================================#
 # Test `canonize` on sequential models #
 #======================================#
 
@@ -77,7 +77,7 @@ model_canonized = canonize(model)
 @test length(model_canonized) == 9 # 15 - 6
 @test model(x) ≈ model_canonized(x)
 
-#====================================#
+##===================================#
 # Test `canonize` on nested models   #
 #====================================#
 
@@ -102,7 +102,7 @@ model_canonized = canonize(model)
 @test length(model_canonized) == 4
 @test model(x) ≈ model_canonized(x)
 
-#=================================================#
+##================================================#
 # Test `canonize` on  models w/ Parallel layers   #
 #=================================================#
 
@@ -134,4 +134,58 @@ model_canonized = canonize(model)
 @test length(model_canonized) == 3
 @test length(model_canonized[2][2]) == 1
 @test length(model_canonized[2][3]) == 2
+@test model(x) ≈ model_canonized(x)
+
+##======================================================#
+# Test `canonize` on  models w/ SkipConnection layers   #
+# and with layers that have to be split (LayerNorm)     #
+#=======================================================#
+x = pseudorand(5, batchsize)
+
+model = Chain(
+    LayerNorm(5), # split
+    Parallel(
+        +,
+        LayerNorm(5), # split
+        Chain(
+            Dense(5 => 5), # fuse
+            BatchNorm(5),
+        ),
+        Chain(
+            LayerNorm(5), # split
+        ),
+    ),
+    SkipConnection(
+        LayerNorm(5), # split
+        +,
+    ),
+    SkipConnection(Chain(
+        LayerNorm(5),
+        Dense(5 => 5), # split
+    ), +),
+    SkipConnection(Chain(
+        Dense(5 => 5), # split
+        BatchNorm(5),
+    ), +),
+    Dense(5 => 5), # fuse
+    BatchNorm(5),
+)
+
+Flux.testmode!(model, false)
+model(x)
+Flux.testmode!(model, true)
+model_canonized = canonize(model)
+
+@test length(model_canonized) == 7
+
+# Check parallel layer
+parallel_canonized = model_canonized[3]
+@test length(parallel_canonized[1]) == 2
+@test length(parallel_canonized[2]) == 1
+@test length(parallel_canonized[3]) == 2
+
+# Check three SkipConnection layers
+@test length(model_canonized[4].layers) == 2
+@test length(model_canonized[5].layers) == 3
+@test length(model_canonized[6].layers) == 1
 @test model(x) ≈ model_canonized(x)
