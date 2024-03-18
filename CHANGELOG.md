@@ -1,4 +1,8 @@
 # RelevancePropagation.jl
+
+## Version `v2.0.1`
+* ![Bugfix][badge-bugfix] Fix model canonization and flattening on `SkipConnection` and `Parallel` ([#14][pr-14])
+
 ## Version `v2.0.0`
 This release removes the automatic reexport of heatmapping functionality.
 Users are now required to manually load 
@@ -41,6 +45,7 @@ Initial release of RelevancePropagation.jl.
 ![Documentation][badge-docs]
 -->
 
+[pr-14]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/14
 [pr-13]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/13
 [pr-12]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/12
 [pr-11]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/11
