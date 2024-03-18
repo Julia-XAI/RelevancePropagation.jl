@@ -18,10 +18,12 @@ end
 # Split layers #
 #==============#
 
-canonize_split(model::Chain) = Chain(canonize_split.(model.layers))
+canonize_split(model::Chain) = Chain(canonize_split(model.layers)...)
 canonize_split(p::Parallel) = Parallel(p.connection, canonize_split.(p.layers))
 canonize_split(s::SkipConnection) = SkipConnection(canonize_split(s.layers), s.connection)
 canonize_split(layer) = layer
+canonize_split(layers::Tuple) = canonize_split.(layers)
+canonize_split(layers::AbstractArray) = canonize_split.(layers)
 
 # Don't split LayerNorm if the affine part is already the identity
 canonize_split(l::LayerNorm{F,D}) where {F,D<:typeof(identity)} = l
@@ -34,7 +36,7 @@ function canonize_split(l::LayerNorm)
         diag = Scale(1, l.λ; bias=false)
         diag.scale .= 1.0
     end
-    return (layer_norm, diag)
+    return Chain(layer_norm, diag)
 end
 
 #=============#
