@@ -186,29 +186,34 @@ flatten_model(x) = chainflatten(x)
 
 Flatten a Flux `Chain` containing `Chain`s. Also works with `ChainTuple`s.
 """
-function chainflatten(c::Chain)
-    return Chain(_chainflatten(c)...)
-end
+chainflatten(c::Chain) = Chain(chainflatten(c.layers)...)
+chainflatten(c::ChainTuple) = ChainTuple(chainflatten(c.vals)...)
 
-function chainflatten(c::ChainTuple)
-    return ChainTuple(_chainflatten(c)...)
-end
+chainflatten(p::Parallel)      = Parallel(p.connection, chainflatten.(p.layers))
+chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
 
-_chainflatten(c::Chain)      = mapreduce(_chainflatten, vcat, c.layers; init=[])
-_chainflatten(c::ChainTuple) = mapreduce(_chainflatten, vcat, c.vals; init=[])
-
-chainflatten(p::Parallel)       = _chainflatten(p)
-chainflatten(p::ParallelTuple)  = _chainflatten(p)
-_chainflatten(p::Parallel)      = Parallel(p.connection, chainflatten.(p.layers))
-_chainflatten(p::ParallelTuple) = ParallelTuple(chainflatten.(p.vals))
-
-chainflatten(s::SkipConnection)       = _chainflatten(s)
-chainflatten(s::SkipConnectionTuple)  = _chainflatten(s)
-_chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
-_chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
+chainflatten(s::SkipConnection)      = SkipConnection(chainflatten(s.layers), s.connection)
+chainflatten(s::SkipConnectionTuple) = SkipConnectionTuple(chainflatten(s.vals))
 
 chainflatten(x) = x
-_chainflatten(x) = x
+
+# Splat Chains, ChainTuples and Tuples using `append!`
+function chainflatten(layers::Tuple)
+    out = []
+    for l in layers
+        flat = chainflatten(l)
+        if flat isa Chain
+            append!(out, flat.layers)
+        elseif flat isa ChainTuple
+            append!(out, flat.vals)
+        elseif flat isa Tuple
+            append!(out, flat)
+        else
+            push!(out, flat)
+        end
+    end
+    return out
+end
 
 #=========================#
 # Strip output activation #
