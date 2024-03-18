@@ -28,7 +28,8 @@ canonize_split(layers::AbstractArray) = canonize_split.(layers)
 # Don't split LayerNorm if the affine part is already the identity
 canonize_split(l::LayerNorm{F,D}) where {F,D<:typeof(identity)} = l
 
-function canonize_split(l::LayerNorm)
+canonize_split(l::LayerNorm) = Chain(split_layernorm(l)...)
+function split_layernorm(l::LayerNorm)
     layer_norm = LayerNorm(identity, identity, l.ϵ, l.size, false)
     if l.diag isa Scale
         diag = l.diag
@@ -36,7 +37,7 @@ function canonize_split(l::LayerNorm)
         diag = Scale(1, l.λ; bias=false)
         diag.scale .= 1.0
     end
-    return Chain(layer_norm, diag)
+    return (layer_norm, diag)
 end
 
 #=============#

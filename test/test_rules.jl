@@ -261,8 +261,7 @@ end
     # not canonized
     modified_layer = modify_layer(rule, layer)
     R̂ᵏ = zero(aᵏ) # will be inplace updated
-    # @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R) # TODO: fix type stability on Julia 1.6
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized
