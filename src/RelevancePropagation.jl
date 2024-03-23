@@ -53,6 +53,6 @@ export EpsilonAlpha2Beta1Flat
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
 
 # utils
-export strip_softmax, flatten_model, canonize, prepare_vit
+export strip_softmax, flatten_model, canonize
 
 end # module
