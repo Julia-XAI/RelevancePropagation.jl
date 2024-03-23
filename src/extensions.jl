@@ -50,7 +50,3 @@ R_i^k = \\frac{a_i^k}{a_i^k + e^i} R_i^{k+1}
 where ``e^i`` is the learned positional embedding.
 """
 struct PositionalEmbeddingRule <: AbstractLRPRule end
-
-# utils
-"""Prepare the vision transformer model for the use with `RelevancePropagation.jl`"""
-function prepare_vit end
