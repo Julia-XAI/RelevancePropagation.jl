@@ -27,7 +27,6 @@ include("lrp.jl")
 include("show.jl")
 include("composite_presets.jl") # uses show.jl
 include("crp.jl")
-include("extensions.jl")
 
 export LRP
 export CRP
