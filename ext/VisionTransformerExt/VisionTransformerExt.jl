@@ -1,4 +1,4 @@
-module VisionTransformerExt
+module RelevancePropagationMetalheadExt
 using RelevancePropagation, Flux
 using RelevancePropagation:
     SelfAttentionRule, SelectClassToken, PositionalEmbeddingRule, modify_layer # all used types have to be used explicitely

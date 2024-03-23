@@ -1,9 +1,9 @@
 # since package extensions should/can not define new types or functions, 
 # we have to define them here and add the relevant methods in the extension
 
-#=========================#
-# VisionTransformerExt    #
-#=========================#
+#==================================#
+# RelevancePropagationMetalheadExt #
+#==================================#
 
 # layers
 """Flux layer to select the first token, for use with Metalhead.jl's vision transformer."""

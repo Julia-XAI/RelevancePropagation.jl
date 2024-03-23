@@ -17,7 +17,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 Metalhead = "dbeba491-748d-5e0e-a39e-b530a07fa0cc"
 
 [extensions]
-VisionTransformerExt = ["Metalhead"]
+RelevancePropagationMetalheadExt = ["Metalhead"]
 
 [compat]
 Flux = "0.13, 0.14"
