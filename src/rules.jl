@@ -610,7 +610,7 @@ Flux.@functor SelectClassToken
 """
     SelfAttentionRule(value_rule=ZeroRule(), out_rule=ZeroRule)
 
-LRP-AH rule. Used on `MultiHeadSelfAttention` layers.
+LRP-AH rule. Used on `MultiHeadSelfAttention` layers from Metalhead.jl. Metalhead.jl has to be loaded to make use of this Rule.
 
 # Definition
 Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
@@ -635,7 +635,7 @@ end
 """
     PositionalEmbeddingRule()
 
-To be used with Metalhead.jl`s `ViPosEmbedding` layer. Treats the positional embedding like a bias term.
+To be used with Metalhead.jl`s `ViPosEmbedding` layer. Treats the positional embedding like a bias term. Metalhead.jl has to be loaded to make use of this Rule.
 
 # Definition
 Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
