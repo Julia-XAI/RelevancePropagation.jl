@@ -7,3 +7,8 @@ function prepare_vit(model::ViT)
     end
     return model
 end
+
+# these are originally from NNlib.jl, but since they are unexported, we don't want
+# to rely on them an re-define them here
+split_heads(x, nheads) = reshape(x, size(x, 1) ÷ nheads, nheads, size(x)[2:end]...)
+join_heads(x) = reshape(x, :, size(x)[3:end]...)

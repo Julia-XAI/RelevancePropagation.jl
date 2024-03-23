@@ -6,8 +6,7 @@ import RelevancePropagation: prepare_vit, is_compatible, lrp! # all functions to
 using Metalhead:
     ViPosEmbedding, ClassTokens, MultiHeadSelfAttention, chunk, ViT, seconddimmean
 using Metalhead.Layers: _flatten_spatial
-using NNlib: split_heads, join_heads
 
-include("rules.jl")
 include("utils.jl")
+include("rules.jl")
 end
