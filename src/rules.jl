@@ -16,6 +16,7 @@ function lrp!(Rᵏ, rule::AbstractLRPRule, layer, modified_layer, aᵏ, Rᵏ⁺�
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
     c = only(back(s))
     Rᵏ .= ãᵏ .* c
+    return Rᵏ
 end
 
 #===================================#
