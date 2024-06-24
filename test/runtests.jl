@@ -1,14 +1,8 @@
-using Test
-using ReferenceTests
-using Aqua
-using JuliaFormatter
-using Random
-
 using RelevancePropagation
-using Flux
-import Flux: Scale
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+using Test
+using JuliaFormatter
+using Aqua
 
 @testset "RelevancePropagation.jl" begin
     @testset "Aqua.jl" begin

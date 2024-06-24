@@ -1,11 +1,14 @@
 using RelevancePropagation
+using Test
+using ReferenceTests
+
 using RelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
 using RelevancePropagation: modify_parameters, modify_weight, modify_bias, modify_layer
 using RelevancePropagation: stabilize_denom
 using Flux
+using Flux: flatten, Scale
 using LinearAlgebra: I
-using ReferenceTests
-using Random
+using Random: randn, MersenneTwister
 
 # Fixed pseudo-random numbers
 T = Float32

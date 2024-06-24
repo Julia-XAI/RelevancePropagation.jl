@@ -1,12 +1,18 @@
 using RelevancePropagation
+using Test
+using ReferenceTests
+
 using Flux
 using JLD2
+using Random: rand, MersenneTwister
 
 const LRP_ANALYZERS = Dict(
     "LRPZero"                   => LRP,
     "LRPZero_COC"               => m -> LRP(m; flatten=false), # chain of chains
     "LRPEpsilonAlpha2Beta1Flat" => m -> LRP(m, EpsilonAlpha2Beta1Flat()),
 )
+
+pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
 input_size = (32, 32, 3, 1)
 input = pseudorand(input_size)

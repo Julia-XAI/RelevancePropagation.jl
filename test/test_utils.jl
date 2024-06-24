@@ -1,9 +1,15 @@
-using Flux
-using Flux: flatten
+using RelevancePropagation
+using Test
+
 using RelevancePropagation: activation_fn, copy_layer, flatten_model
 using RelevancePropagation: has_output_softmax, check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
-using Random
+
+using Flux
+using Flux: flatten, Scale
+using Random: rand, MersenneTwister
+
+pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
 # Test `activation_fn`
 @test activation_fn(Dense(5, 2, gelu)) == gelu
