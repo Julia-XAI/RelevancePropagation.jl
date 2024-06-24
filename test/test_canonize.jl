@@ -1,8 +1,12 @@
+using RelevancePropagation
+using Test
+
 using Flux
 using Flux: flatten, Scale
-using RelevancePropagation
 using RelevancePropagation: canonize_fuse
 using Random
+
+pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
 batchsize = 50
 

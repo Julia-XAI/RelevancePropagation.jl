@@ -142,7 +142,7 @@ expl.extras.layerwise_relevances
 # ## Performance tips
 # ### Using LRP with a GPU
 # All LRP analyzers support GPU backends,
-# building on top of [Flux.jl's GPU support](https://fluxml.ai/Flux.jl/stable/gpu/).
+# building on top of [Flux.jl's GPU support](https://fluxml.ai/Flux.jl/stable/guide/gpu/).
 # Using a GPU only requires moving the input array and model weights to the GPU.
 #
 # For example, using [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl):

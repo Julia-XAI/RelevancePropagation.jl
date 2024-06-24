@@ -1,6 +1,10 @@
-using Flux
 using RelevancePropagation
-using Random
+using Test
+
+using Flux
+using Random: rand, MersenneTwister
+
+pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
 
 ## Test `fuse_batchnorm` on Dense and Conv layers
 ins = 20

@@ -1,24 +1,23 @@
-using Test
-using ReferenceTests
-using Aqua
-using JuliaFormatter
-using Random
-
 using RelevancePropagation
-using Flux
-import Flux: Scale
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+using Test
+using JuliaFormatter
+using Aqua
 
 @testset "RelevancePropagation.jl" begin
-    @testset "Aqua.jl" begin
-        @info "Running Aqua.jl's auto quality assurance tests. These might print warnings from dependencies."
-        Aqua.test_all(RelevancePropagation; ambiguities=false)
+    if VERSION >= v"1.10"
+        @testset "Code formatting" begin
+            @info "- Testing code formatting with JuliaFormatter..."
+            @test JuliaFormatter.format(
+                RelevancePropagation; verbose=false, overwrite=false
+            )
+        end
+        @testset "Aqua.jl" begin
+            @info "- Running Aqua.jl tests. These might print warnings from dependencies..."
+            Aqua.test_all(RelevancePropagation; ambiguities=false)
+        end
     end
-    @testset "JuliaFormatter.jl" begin
-        @info "Running JuliaFormatter's code formatting tests."
-        @test format(RelevancePropagation; verbose=false, overwrite=false)
-    end
+
     @testset "Utilities" begin
         @info "Testing utilities..."
         include("test_utils.jl")
