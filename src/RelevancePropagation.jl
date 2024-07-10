@@ -36,7 +36,7 @@ export AbstractLRPRule
 export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
-export LayerNormRule
+export LayerNormRule, PositionalEmbeddingRule, SelfAttentionRule
 
 # LRP composites
 export Composite, AbstractCompositePrimitive
