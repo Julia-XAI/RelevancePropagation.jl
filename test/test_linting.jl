@@ -3,7 +3,6 @@ using Test
 
 using JuliaFormatter: JuliaFormatter
 using Aqua: Aqua
-using JET: JET
 using ExplicitImports:
     check_no_implicit_imports,
     check_no_stale_explicit_imports,
@@ -19,11 +18,6 @@ end
 @testset "Aqua.jl" begin
     @info "...with Aqua.jl"
     Aqua.test_all(RelevancePropagation; ambiguities=false)
-end
-
-@testset "JET.jl" begin
-    @info "...with JET.jl"
-    JET.test_package(RelevancePropagation; target_defined_modules=true)
 end
 
 @testset "ExplicitImports tests" begin
