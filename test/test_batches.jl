@@ -36,6 +36,6 @@ for (name, method) in ANALYZERS
         expl2_bd = analyzer(input2_bd)
         analyzer = method(model)
         expl_batch = analyzer(input_batch)
-        @test expl1_bd.val ≈ expl_batch.val[:, 1]
+        @test expl2_bd.val ≈ expl_batch.val[:, 2]
     end
 end
