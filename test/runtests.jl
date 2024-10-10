@@ -54,4 +54,8 @@ using Aqua
         @info "Testing analyzers on batches..."
         include("test_batches.jl")
     end
+    @testset "Benchmark correctness" begin
+        @info "Testing whether benchmarks are up-to-date..."
+        include("test_benchmarks.jl")
+    end
 end
