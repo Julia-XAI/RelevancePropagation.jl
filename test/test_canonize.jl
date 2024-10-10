@@ -5,8 +5,9 @@ using Flux
 using Flux: flatten, Scale
 using RelevancePropagation: canonize_fuse
 using Random
+using StableRNGs: StableRNG
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
 
 batchsize = 50
 

@@ -4,7 +4,8 @@ using ReferenceTests
 
 using Flux
 using JLD2
-using Random: rand, MersenneTwister
+using Random: rand
+using StableRNGs: StableRNG
 
 const LRP_ANALYZERS = Dict(
     "LRPZero"                   => LRP,
@@ -12,12 +13,12 @@ const LRP_ANALYZERS = Dict(
     "LRPEpsilonAlpha2Beta1Flat" => m -> LRP(m, EpsilonAlpha2Beta1Flat()),
 )
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
 
 input_size = (32, 32, 3, 1)
 input = pseudorand(input_size)
 
-init(dims...) = Flux.glorot_uniform(MersenneTwister(123), dims...)
+init(dims...) = Flux.glorot_uniform(StableRNG(123), dims...)
 
 model = Chain(
     Chain(

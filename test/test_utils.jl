@@ -7,9 +7,10 @@ using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 
 using Flux
 using Flux: flatten, Scale
-using Random: rand, MersenneTwister
+using Random: rand
+using StableRNGs: StableRNG
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
 
 # Test `activation_fn`
 @test activation_fn(Dense(5, 2, gelu)) == gelu
