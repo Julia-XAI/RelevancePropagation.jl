@@ -2,9 +2,10 @@ using RelevancePropagation
 using Test
 
 using Flux
-using Random: rand, MersenneTwister
+using Random: rand
+using StableRNGs: StableRNG
 
-pseudorand(dims...) = rand(MersenneTwister(123), Float32, dims...)
+pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
 
 ## Test `fuse_batchnorm` on Dense and Conv layers
 ins = 20
@@ -14,11 +15,11 @@ batchsize = 15
 model = Chain(Dense(ins, outs, relu; init=pseudorand))
 
 # Input 1 w/o batch dimension
-input1_no_bd = rand(MersenneTwister(1), Float32, ins)
+input1_no_bd = rand(StableRNG(1), Float32, ins)
 # Input 1 with batch dimension
 input1_bd = reshape(input1_no_bd, ins, 1)
 # Input 2 with batch dimension
-input2_bd = rand(MersenneTwister(2), Float32, ins, 1)
+input2_bd = rand(StableRNG(2), Float32, ins, 1)
 # Batch containing inputs 1 & 2
 input_batch = cat(input1_bd, input2_bd; dims=2)
 

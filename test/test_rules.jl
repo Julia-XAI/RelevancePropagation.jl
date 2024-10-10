@@ -8,11 +8,12 @@ using RelevancePropagation: stabilize_denom
 using Flux
 using Flux: flatten, Scale
 using LinearAlgebra: I
-using Random: randn, MersenneTwister
+using Random: randn
+using StableRNGs: StableRNG
 
 # Fixed pseudo-random numbers
 T = Float32
-pseudorandn(dims...) = randn(MersenneTwister(123), T, dims...)
+pseudorandn(dims...) = randn(StableRNG(123), T, dims...)
 
 const RULES = Dict(
     "ZeroRule"             => ZeroRule(),

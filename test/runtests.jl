@@ -4,8 +4,8 @@ using Test
 using JuliaFormatter
 using Aqua
 
-@testset "RelevancePropagation.jl" begin
-    if VERSION >= v"1.10"
+@testset verbose = true "RelevancePropagation.jl" begin
+    @testset verbose = true "Linting" begin
         @testset "Code formatting" begin
             @info "- Testing code formatting with JuliaFormatter..."
             @test JuliaFormatter.format(
