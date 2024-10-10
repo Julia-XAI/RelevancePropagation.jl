@@ -14,7 +14,7 @@ XAIBase = "9b48221d-a747-4c1b-9860-46a1d8ba24a7"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-Flux = "0.13, 0.14"
+Flux = "0.14"
 MacroTools = "0.5"
 Markdown = "1"
 Random = "1"
