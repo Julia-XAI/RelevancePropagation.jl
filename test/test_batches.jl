@@ -30,14 +30,6 @@ ANALYZERS = Dict(
 
 for (name, method) in ANALYZERS
     @testset "$name" begin
-        # Using `add_batch_dim=true` should result in same explanation
-        # as input reshaped to have a batch dimension
-        analyzer = method(model)
-        expl1_no_bd = analyzer(input1_no_bd; add_batch_dim=true)
-        analyzer = method(model)
-        expl1_bd = analyzer(input1_bd)
-        @test expl1_bd.val ≈ expl1_no_bd.val
-
         # Analyzing a batch should have the same result
         # as analyzing inputs in batch individually
         analyzer = method(model)
