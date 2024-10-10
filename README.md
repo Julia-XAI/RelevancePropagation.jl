@@ -12,7 +12,7 @@ This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) 
 [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
 
 ## Installation 
-This package supports Julia ≥1.6. To install it, open the Julia REPL and run 
+This package supports Julia ≥1.10. To install it, open the Julia REPL and run 
 ```julia-repl
 julia> ]add RelevancePropagation
 ```

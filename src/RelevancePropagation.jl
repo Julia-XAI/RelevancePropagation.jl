@@ -12,7 +12,6 @@ using Zygote
 using Markdown
 using Statistics: mean, std
 
-include("compat.jl")
 include("bibliography.jl")
 include("layer_types.jl")
 include("layer_utils.jl")
