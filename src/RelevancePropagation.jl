@@ -2,6 +2,7 @@ module RelevancePropagation
 
 using Reexport
 @reexport using XAIBase
+import XAIBase: call_analyzer
 
 using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
