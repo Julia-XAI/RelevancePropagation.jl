@@ -55,8 +55,8 @@ LRP(model::Chain, c::Composite; kwargs...) = LRP(model, lrp_rules(model, c); kwa
 # Call to the LRP analyzer #
 #==========================#
 
-function (lrp::LRP)(
-    input::AbstractArray, ns::AbstractOutputSelector; layerwise_relevances=false
+function call_analyzer(
+    input::AbstractArray, lrp::LRP, ns::AbstractOutputSelector; layerwise_relevances=false
 )
     as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
     Rs = similar.(as)                         # allocate relevances Rᵏ for all layers k
@@ -64,7 +64,7 @@ function (lrp::LRP)(
 
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
-    return Explanation(first(Rs), last(as), ns(last(as)), :LRP, :attribution, extras)
+    return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
 end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)

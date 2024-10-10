@@ -2,6 +2,7 @@ module RelevancePropagation
 
 using Reexport
 @reexport using XAIBase
+import XAIBase: call_analyzer
 
 using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
@@ -12,7 +13,6 @@ using Zygote
 using Markdown
 using Statistics: mean, std
 
-include("compat.jl")
 include("bibliography.jl")
 include("layer_types.jl")
 include("layer_utils.jl")
