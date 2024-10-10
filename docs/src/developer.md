@@ -100,7 +100,7 @@ Using the [Zygote.jl](https://github.com/FluxML/Zygote.jl) AD system,
 we obtain the output $z$ of a modified layer and its pullback `back` in a single function call:
 
 ```julia
-z, back = Zygote.pullback(modified_layer, aᵏ)
+z, back = pullback(modified_layer, aᵏ)
 ```
 We then call the pullback with the vector $s$ to obtain $c$:
 ```julia
@@ -201,7 +201,7 @@ function lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
    layer = isnothing(modified_layer) ? layer : modified_layer
 
    ãᵏ = modify_input(rule, aᵏ)
-   z, back = Zygote.pullback(modified_layer, ãᵏ)
+   z, back = pullback(modified_layer, ãᵏ)
    s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
    Rᵏ .= ãᵏ .* only(back(s))
 end

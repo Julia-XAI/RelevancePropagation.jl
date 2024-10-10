@@ -12,7 +12,7 @@ const LRP_DEFAULT_BETA = 1.0f0
 function lrp!(Rᵏ, rule::AbstractLRPRule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     layer = isnothing(modified_layer) ? layer : modified_layer
     ãᵏ = modify_input(rule, aᵏ)
-    z, back = Zygote.pullback(layer, ãᵏ)
+    z, back = pullback(layer, ãᵏ)
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
     c = only(back(s))
     Rᵏ .= ãᵏ .* c
@@ -338,9 +338,9 @@ function lrp!(Rᵏ, rule::ZBoxRule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
     l = zbox_input(aᵏ, rule.low)
     h = zbox_input(aᵏ, rule.high)
 
-    z, back = Zygote.pullback(layer, aᵏ)
-    z⁺, back⁺ = Zygote.pullback(modified_layers.layer⁺, l)
-    z⁻, back⁻ = Zygote.pullback(modified_layers.layer⁻, h)
+    z, back = pullback(layer, aᵏ)
+    z⁺, back⁺ = pullback(modified_layers.layer⁺, l)
+    z⁻, back⁻ = pullback(modified_layers.layer⁻, h)
 
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z - z⁺ - z⁻)
     c = only(back(s))
@@ -402,8 +402,8 @@ function lrp!(Rᵏ, rule::AlphaBetaRule, _layer, modified_layers, aᵏ, Rᵏ⁺�
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
-    zᵅ⁺, back⁺ = Zygote.pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
-    zᵅ⁻, back⁻ = Zygote.pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
+    zᵅ⁺, back⁺ = pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
+    zᵅ⁻, back⁻ = pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
     # No need to linearize again: Wᵝ⁺ = Wᵅ⁺ and Wᵝ⁻ = Wᵅ⁻
     zᵝ⁺ = modified_layers.layerᵝ⁺(aᵏ⁻)
     zᵝ⁻ = modified_layers.layerᵝ⁻(aᵏ⁺)
@@ -451,8 +451,8 @@ function lrp!(Rᵏ, rule::ZPlusRule, _layer, modified_layers, aᵏ, Rᵏ⁺¹)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
-    z⁺, back⁺ = Zygote.pullback(modified_layers.layer⁺, aᵏ⁺)
-    z⁻, back⁻ = Zygote.pullback(modified_layers.layer⁻, aᵏ⁻)
+    z⁺, back⁺ = pullback(modified_layers.layer⁺, aᵏ⁺)
+    z⁻, back⁻ = pullback(modified_layers.layer⁻, aᵏ⁻)
 
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z⁺ + z⁻)
     c⁺ = only(back⁺(s))
@@ -504,8 +504,8 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer, modified_layers, aᵏ, R�
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
-    zˡ⁺, back⁺ = Zygote.pullback(modified_layers.layerˡ⁺, aᵏ⁺)
-    zˡ⁻, back⁻ = Zygote.pullback(modified_layers.layerˡ⁻, aᵏ⁻)
+    zˡ⁺, back⁺ = pullback(modified_layers.layerˡ⁺, aᵏ⁺)
+    zˡ⁻, back⁻ = pullback(modified_layers.layerˡ⁻, aᵏ⁻)
     # No need to linearize again: Wˡ⁺ = Wʳ⁺ and Wˡ⁻ = Wʳ⁻
     zʳ⁺ = modified_layers.layerʳ⁺(aᵏ⁻)
     zʳ⁻ = modified_layers.layerʳ⁻(aᵏ⁺)

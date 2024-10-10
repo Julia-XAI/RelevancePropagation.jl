@@ -6,18 +6,9 @@ using Aqua
 
 @testset verbose = true "RelevancePropagation.jl" begin
     @testset verbose = true "Linting" begin
-        @testset "Code formatting" begin
-            @info "- Testing code formatting with JuliaFormatter..."
-            @test JuliaFormatter.format(
-                RelevancePropagation; verbose=false, overwrite=false
-            )
-        end
-        @testset "Aqua.jl" begin
-            @info "- Running Aqua.jl tests. These might print warnings from dependencies..."
-            Aqua.test_all(RelevancePropagation; ambiguities=false)
-        end
+        @info "Testing linting..."
+        include("test_linting.jl")
     end
-
     @testset "Utilities" begin
         @info "Testing utilities..."
         include("test_utils.jl")
