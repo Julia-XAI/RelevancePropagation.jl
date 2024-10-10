@@ -3,7 +3,7 @@ using Test
 using ReferenceTests
 
 using RelevancePropagation: check_lrp_compat, print_lrp_model_check
-using Suppressor
+using Suppressor: @suppress
 
 err = ErrorException("Unknown layer or activation function found in model")
 
