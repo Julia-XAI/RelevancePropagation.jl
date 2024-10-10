@@ -1,17 +1,26 @@
 module RelevancePropagation
 
-using Reexport
-@reexport using XAIBase
-import XAIBase: call_analyzer
-
-using XAIBase: AbstractFeatureSelector, number_of_features
 using Base.Iterators
+using Reexport: @reexport
+import XAIBase: call_analyzer
+using XAIBase: XAIBase, AbstractXAIMethod, Explanation
+using XAIBase: AbstractOutputSelector, AbstractFeatureSelector, number_of_features
+
 using MacroTools: @forward
-using Flux
-using Flux: Scale, normalise
-using Zygote
-using Markdown
+using Flux: Flux, Chain, Parallel, SkipConnection
+using Flux: Dense, Conv, ConvTranspose, CrossCor
+using Flux: BatchNorm, GroupNorm, InstanceNorm, LayerNorm, Scale
+using Flux:
+    MaxPool, MeanPool, AdaptiveMaxPool, AdaptiveMeanPool, GlobalMaxPool, GlobalMeanPool
+using Flux: AlphaDropout, Dropout, dropout
+using NNlib: relu, gelu, swish, mish, softmax, softmax!
+using MLUtils: MLUtils
+
+using Zygote: pullback
+using Markdown: @md_str
 using Statistics: mean, std
+
+@reexport using XAIBase
 
 include("bibliography.jl")
 include("layer_types.jl")
