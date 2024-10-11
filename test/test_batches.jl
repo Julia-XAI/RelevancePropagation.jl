@@ -39,3 +39,26 @@ for (name, method) in ANALYZERS
         @test expl2_bd.val ≈ expl_batch.val[:, 2]
     end
 end
+
+@testset "Normalized output relevance" begin
+    analyzer1 = LRP(model)
+    analyzer2 = LRP(model; normalize_output_relevance=false)
+
+    e1 = analyze(input_batch, analyzer1)
+    e2 = analyze(input_batch, analyzer2)
+    v1_bd1 = e1.val[:, 1]
+    v1_bd2 = e1.val[:, 2]
+    v2_bd1 = e2.val[:, 1]
+    v2_bd2 = e2.val[:, 2]
+
+    @test isapprox(sum(v1_bd1), 1, atol=0.05)
+    @test isapprox(sum(v1_bd2), 1, atol=0.05)
+    @test !isapprox(sum(v2_bd1), 1; atol=0.05)
+    @test !isapprox(sum(v2_bd2), 1; atol=0.05)
+
+    ratio_bd1 = first(v1_bd1) / first(v2_bd1)
+    ratio_bd2 = first(v1_bd2) / first(v2_bd2)
+    @test !isapprox(ratio_bd1, ratio_bd2)
+    @test v1_bd1 ≈ v2_bd1 * ratio_bd1
+    @test v1_bd2 ≈ v2_bd2 * ratio_bd2
+end

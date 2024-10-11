@@ -110,3 +110,18 @@ end
     @test lwr1[1] ≈ lwr2[1]
     @test lwr1[end] ≈ lwr2[end]
 end
+
+@testset "Normalized output relevance" begin
+    analyzer1 = LRP(model)
+    analyzer2 = LRP(model; normalize_output_relevance=false)
+
+    e1 = analyze(input, analyzer1)
+    e2 = analyze(input, analyzer2)
+    v1, v2 = e1.val, e2.val
+
+    @test isapprox(sum(v1), 1, atol=0.05)
+    @test !isapprox(sum(v2), 1; atol=0.05)
+
+    ratio = first(v1) / first(v2)
+    @test v1 ≈ v2 * ratio
+end
