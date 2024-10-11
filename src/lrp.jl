@@ -11,8 +11,10 @@ The analyzer can either be created by passing an array of LRP-rules
 or by passing a composite, see [`Composite`](@ref) for an example.
 
 # Keyword arguments
-- `skip_checks::Bool`: Skip checks whether model is compatible with LRP and contains output softmax. Default is `false`.
-- `verbose::Bool`: Select whether the model checks should print a summary on failure. Default is `true`.
+- `normalize_output_relevance`: Selects whether output relevance should be set to 1 before applying LRP backward pass.
+    Defaults to `true` to match literature. If `false`, values of output activations are used.
+- `skip_checks::Bool`: Skip checks whether model is compatible with LRP and contains output softmax. Defaults to `false`.
+- `verbose::Bool`: Select whether the model checks should print a summary on failure. Defaults to `true`.
 
 # References
 [1] G. Montavon et al., Layer-Wise Relevance Propagation: An Overview
@@ -22,10 +24,16 @@ struct LRP{C<:Chain,R<:ChainTuple,L<:ChainTuple} <: AbstractXAIMethod
     model::C
     rules::R
     modified_layers::L
+    normalize_output_relevance::Bool
 
     # Construct LRP analyzer by assigning a rule to each layer
     function LRP(
-        model::Chain, rules::ChainTuple; skip_checks=false, flatten=true, verbose=true
+        model::Chain,
+        rules::ChainTuple;
+        normalize_output_relevance::Bool=true,
+        skip_checks=false,
+        flatten=true,
+        verbose=true,
     )
         if flatten
             model = chainflatten(model)
@@ -37,7 +45,7 @@ struct LRP{C<:Chain,R<:ChainTuple,L<:ChainTuple} <: AbstractXAIMethod
         end
         modified_layers = get_modified_layers(rules, model)
         return new{typeof(model),typeof(rules),typeof(modified_layers)}(
-            model, rules, modified_layers
+            model, rules, modified_layers, normalize_output_relevance
         )
     end
 end
@@ -59,9 +67,8 @@ function call_analyzer(
     input::AbstractArray, lrp::LRP, ns::AbstractOutputSelector; layerwise_relevances=false
 )
     as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
-    Rs = similar.(as)                         # allocate relevances Rᵏ for all layers k
-    mask_output_neuron!(Rs[end], as[end], ns) # compute relevance Rᴺ of output layer N
-
+    Rs = similar.(as)
+    mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
     return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
@@ -69,10 +76,16 @@ end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)
 
-function mask_output_neuron!(R_out, a_out, ns::AbstractOutputSelector)
+function mask_output_neuron!(
+    R_out, a_out, ns::AbstractOutputSelector, normalize_output_relevance::Bool
+)
     fill!(R_out, 0)
     idx = ns(a_out)
-    R_out[idx] .= 1
+    if normalize_output_relevance
+        R_out[idx] .= 1
+    else
+        R_out[idx] .= a_out[idx]
+    end
     return R_out
 end
 
