@@ -35,9 +35,9 @@ end
 function call_analyzer(
     input::AbstractArray{T,N}, crp::CRP, ns::AbstractOutputSelector
 ) where {T,N}
-    rules = crp.lrp.rules
-    layers = crp.lrp.model.layers
-    modified_layers = crp.lrp.modified_layers
+    # Unpack internal LRP analyzer
+    (; model, rules, modified_layers, normalize_output_relevance) = crp.lrp
+    layers = model.layers
 
     n_layers = length(layers)
     n_features = number_of_features(crp.features)
@@ -45,8 +45,8 @@ function call_analyzer(
 
     # Forward pass
     as = get_activations(crp.lrp.model, input) # compute activations aᵏ for all layers k
-    Rs = similar.(as)                          # allocate relevances Rᵏ for all layers k
-    mask_output_neuron!(Rs[end], as[end], ns)  # compute relevance Rᴺ of output layer N
+    Rs = similar.(as) # allocate relevances Rᵏ for all layers k
+    mask_output_neuron!(Rs[end], as[end], ns, normalize_output_relevance) # compute relevance Rᴺ of output layer N
 
     # Allocate array for returned relevance, adding features to batch dimension
     R_return = similar(input, size(input)[1:(end - 1)]..., batchsize * n_features)
