@@ -32,7 +32,9 @@ end
 # Call to CRP analyzer #
 #======================#
 
-function (crp::CRP)(input::AbstractArray{T,N}, ns::AbstractOutputSelector) where {T,N}
+function call_analyzer(
+    input::AbstractArray{T,N}, crp::CRP, ns::AbstractOutputSelector
+) where {T,N}
     rules = crp.lrp.rules
     layers = crp.lrp.model.layers
     modified_layers = crp.lrp.modified_layers
@@ -88,5 +90,5 @@ function (crp::CRP)(input::AbstractArray{T,N}, ns::AbstractOutputSelector) where
             end
         end
     end
-    return Explanation(R_return, last(as), ns(last(as)), :CRP, :attribution, nothing)
+    return Explanation(R_return, input, last(as), ns(last(as)), :CRP, :attribution, nothing)
 end

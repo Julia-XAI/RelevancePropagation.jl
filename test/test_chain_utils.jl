@@ -1,3 +1,6 @@
+using RelevancePropagation
+using Test
+
 using RelevancePropagation: ChainTuple, ParallelTuple, SkipConnectionTuple
 using RelevancePropagation: ModelIndex, chainmap, chainindices, chainzip
 using RelevancePropagation: activation_fn

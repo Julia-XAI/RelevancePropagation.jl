@@ -1,12 +1,14 @@
 name = "RelevancePropagation"
 uuid = "0be6dd02-ae9e-43eb-b318-c6e81d6890d8"
 authors = ["Adrian Hill <gh@adrianhill.de>"]
-version = "2.0.1"
+version = "3.0.0-DEV"
 
 [deps]
 Flux = "587475ba-b771-5e3f-ad9e-33799f191a9c"
+MLUtils = "f1d291b0-491e-4a28-83b9-f70985020b54"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 Markdown = "d6f4376e-aef5-505a-96c1-9c027394607a"
+NNlib = "872c559c-99b0-510c-b3b7-b6c96a88d5cd"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
@@ -14,12 +16,14 @@ XAIBase = "9b48221d-a747-4c1b-9860-46a1d8ba24a7"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-Flux = "0.13, 0.14"
+Flux = "0.14"
+MLUtils = "0.4.4"
 MacroTools = "0.5"
 Markdown = "1"
+NNlib = "0.9.24"
 Random = "1"
 Reexport = "1"
 Statistics = "1"
-XAIBase = "3"
+XAIBase = "4"
 Zygote = "0.6"
-julia = "1.6"
+julia = "1.10"

@@ -1,15 +1,19 @@
 using RelevancePropagation
+using Test
+using ReferenceTests
+
 using RelevancePropagation: lrp!, modify_input, modify_denominator, is_compatible
 using RelevancePropagation: modify_parameters, modify_weight, modify_bias, modify_layer
 using RelevancePropagation: stabilize_denom
 using Flux
+using Flux: flatten, Scale
 using LinearAlgebra: I
-using ReferenceTests
-using Random
+using Random: randn
+using StableRNGs: StableRNG
 
 # Fixed pseudo-random numbers
 T = Float32
-pseudorandn(dims...) = randn(MersenneTwister(123), T, dims...)
+pseudorandn(dims...) = randn(StableRNG(123), T, dims...)
 
 const RULES = Dict(
     "ZeroRule"             => ZeroRule(),

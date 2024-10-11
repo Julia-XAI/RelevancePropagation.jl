@@ -1,3 +1,8 @@
+using RelevancePropagation
+using Test
+
+using Flux
+
 @testset "CRP analytic" begin
     W1 = [1.0 3.0; 4.0 2.0]
     b1 = [0.0, 1.0]

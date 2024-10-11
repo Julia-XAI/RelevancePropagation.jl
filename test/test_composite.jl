@@ -1,6 +1,11 @@
 using RelevancePropagation
+using Test
+using ReferenceTests
+
+using NNlib
+using Flux
+using Flux: flatten, Scale
 using Metalhead
-using Flux, NNlib
 
 model = VGG(11; pretrain=false).layers
 model_flat = flatten_model(model)

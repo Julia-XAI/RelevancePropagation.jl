@@ -5,10 +5,10 @@ const DataflowLayer = Union{Chain,Parallel,SkipConnection}
 const ConvLayer = Union{Conv,ConvTranspose,CrossCor}
 
 """Union type for dropout layers."""
-const DropoutLayer = Union{Dropout,typeof(Flux.dropout),AlphaDropout}
+const DropoutLayer = Union{Dropout,typeof(dropout),AlphaDropout}
 
 """Union type for reshaping layers such as `flatten`."""
-const ReshapingLayer = Union{typeof(Flux.flatten),typeof(Flux.MLUtils.flatten)}
+const ReshapingLayer = Union{typeof(Flux.flatten),typeof(MLUtils.flatten)}
 
 """Union type for max pooling layers."""
 const MaxPoolLayer = Union{MaxPool,AdaptiveMaxPool,GlobalMaxPool}
