@@ -25,9 +25,12 @@ using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Me
 
 ```julia
 using RelevancePropagation
-using VisionHeatmaps             # visualization of explanations as heatmaps
-using Flux
-using Metalhead                  # pre-trained vision models
+using VisionHeatmaps         # visualization of explanations as heatmaps
+using Flux, Metalhead        # pre-trained vision models in Flux
+using DataAugmentation       # input preprocessing
+using HTTP, FileIO, ImageIO  # load image from URL
+using ImageInTerminal        # show heatmap in terminal
+
 
 # Load & prepare model
 model = VGG(16, pretrain=true).layers
@@ -35,14 +38,21 @@ model = strip_softmax(model)
 model = canonize(model)
 
 # Load input
-input = ...                      # input in WHCN format
+url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
+img = load(url) 
+
+# Preprocess input
+mean = (0.485f0, 0.456f0, 0.406f0)
+std  = (0.229f0, 0.224f0, 0.225f0)
+tfm = CenterResizeCrop((224, 224)) |> ImageToTensor() |> Normalize(mean, std)
+input = apply(tfm, Image(img))               # apply DataAugmentation transform
+input = reshape(input.data, 224, 224, 3, :)  # unpack data and add batch dimension
 
 # Run XAI method
 composite = EpsilonPlusFlat()
 analyzer = LRP(model, composite)
 expl = analyze(input, analyzer)  # or: expl = analyzer(input)
 heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
-
 ```
 
 We can also get an explanation for the activation of the output neuron 
