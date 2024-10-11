@@ -22,10 +22,16 @@ struct LRP{C<:Chain,R<:ChainTuple,L<:ChainTuple} <: AbstractXAIMethod
     model::C
     rules::R
     modified_layers::L
+    normalize_output_relevance::Bool
 
     # Construct LRP analyzer by assigning a rule to each layer
     function LRP(
-        model::Chain, rules::ChainTuple; skip_checks=false, flatten=true, verbose=true
+        model::Chain,
+        rules::ChainTuple;
+        normalize_output_relevance::Bool=true,
+        skip_checks=false,
+        flatten=true,
+        verbose=true,
     )
         if flatten
             model = chainflatten(model)
@@ -37,7 +43,7 @@ struct LRP{C<:Chain,R<:ChainTuple,L<:ChainTuple} <: AbstractXAIMethod
         end
         modified_layers = get_modified_layers(rules, model)
         return new{typeof(model),typeof(rules),typeof(modified_layers)}(
-            model, rules, modified_layers
+            model, rules, modified_layers, normalize_output_relevance
         )
     end
 end
@@ -60,11 +66,7 @@ function call_analyzer(
 )
     as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
     Rs = similar.(as)
-    if isnothing(R)                         # allocate relevances Rᵏ for all layers k
-        mask_output_neuron!(Rs[end], as[end], ns; normalize_output=normalize_output) # compute relevance Rᴺ of output layer N
-    else
-        Rs[end] .= R # if there is a user-specified relevance for the last layer, use that instead
-    end
+    mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
     return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
@@ -73,11 +75,11 @@ end
 get_activations(model, input) = (input, Flux.activations(model, input)...)
 
 function mask_output_neuron!(
-    R_out, a_out, ns::AbstractOutputSelector; normalize_output=true
+    R_out, a_out, ns::AbstractOutputSelector, normalize_output_relevance::Bool
 )
     fill!(R_out, 0)
     idx = ns(a_out)
-    if normalize_output
+    if normalize_output_relevance
         R_out[idx] .= 1
     else
         R_out[idx] .= a_out[idx]
