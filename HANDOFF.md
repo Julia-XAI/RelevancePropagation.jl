@@ -1,47 +1,53 @@
 # Handoff — v4.0.0 Lux/Enzyme port
 
-**Branch:** `ah/enzyme` · **Plan:** PLAN.md (phases 1–5 complete, ticked) ·
+**Branch:** `ah/enzyme` · **Plan:** PLAN.md (phases 1–6 complete, ticked) ·
 **Porting notes:** NOTES.md
 
 ## Current state
 
-- Phases 1–5 are committed through `3c799dc` (`phase 5: JuliaFormatter sweep
-  over phase 5 test files`). The working tree is clean apart from this file,
-  PLAN.md checkbox updates and a NOTES.md phase-5 section.
-- Last full suite run (at the canonize commit `2ce8867`, before the
-  formatting-only sweep): **497 pass, 5 broken, 0 failures** in ~3 min.
-  The 5 broken tests are the "Not yet ported" markers in runtests.jl:
-  crp (phase 6), cnn / batches / benchmarks / linting (phase 7).
-- All phase-5 utilities are exported: `strip_softmax` (model-only),
-  `flatten_model(model, ps, st)` and `canonize(model, ps, st)` (joint
-  triples, re-keyed to `layer_1..layer_N`). The LayerNorm canonize guard in
-  test_rules.jl activated automatically (`ported(:canonize)`).
+- Phases 1–6 are committed through `a87672d` (`phase 6: port CRP to Lux`).
+- Last full suite run (at the CRP commit): **499 pass, 4 broken,
+  0 failures** in ~3 min. The 4 broken tests are the "Not yet ported"
+  markers in runtests.jl, all phase 7: cnn, batches, benchmarks, linting.
+- `CRP` is exported and tested (`test/test_crp.jl`, analytic MLP). The
+  port kept the v3 algorithm; NamedTuples are unpacked positionally via
+  `values()`, and the flat-model assumption (positional `layer::Int`) is
+  now documented in the docstring — users `flatten_model` first.
 
-## Next: Phase 6 (CRP)
+## Next: Phase 7 (tests, docs, release)
 
-Port `src/crp.jl` (v3 file: `git show 2550998~1:src/crp.jl`; the on-disk
-copy is identical). The port is near-mechanical:
+Per PLAN.md, roughly in commit order:
 
-- `CRP(lrp, layer::Int, features)` wraps an already-constructed `LRP`
-  analyzer — no new Lux plumbing. `length(lrp.model)` works on Lux `Chain`s.
-- v3 indexes `rules[k]`, `layers[k]`, `modified_layers[k]` **positionally**
-  in the backward loops. In v4 these are NamedTuples on the `LRP` struct —
-  unpack once via `values(lrp.rules)`, `values(lrp.layers)`,
-  `values(lrp.modified_layers)` (see `lrp_backward_pass!` in `src/lrp.jl`),
-  then the `k`-loops port unchanged.
-- `get_activations(model, input)` → v4's
-  `get_activations(lrp.layers, input)` (NamedTuple of `FrozenLayer`s;
-  same `(input, a¹, …, aᴺ)` tuple contract).
-- `AbstractFeatureSelector`/`TopNFeatures`/`IndexedFeatures` come from
-  XAIBase and are framework-agnostic; the feature masking code
-  (`R_feature[idx] .= …`) touches plain arrays only.
-- CRP assumes a **flat** model (positional `layer::Int`); document that
-  users should `flatten_model` first (v3 had the same implicit assumption).
-- Port `test/test_crp.jl` (v3 on disk): Flux MLP/CNN → Lux triple via
-  `Lux.setup(StableRNG(123), model)`; include in runtests.jl and remove the
-  phase-6 marker. No JLD2 references involved.
+- **CNN tests + JLD2 regeneration** (`test/test_cnn.jl`,
+  `test/test_batches.jl`; v3 files on disk). Port models to the Lux
+  triple via `Lux.setup(StableRNG(123), model)`. Model-level JLD2
+  references **must be regenerated** — `Lux.setup` draws parameters in a
+  different order than Flux init, same seed or not. ReferenceTests
+  creates missing reference files on first run (test passes with
+  `@info`): delete the old refs, run, inspect, commit. Commit strategy:
+  generating script/test port first, binary blobs in their own commit.
+- **Zygote-vs-Enzyme consistency testset** — already done: landed with
+  phase 2 as `test/test_autodiff.jl` (Zygote is test-only in
+  `test/Project.toml`). PLAN checkbox ticked.
+- **Linting** (`test_linting.jl`): re-enable JuliaFormatter/Aqua/
+  ExplicitImports. Delete the stale `test/Manifest.toml` (v3 leftover
+  with Flux pins, Oct 2024, ignored by `Pkg.test`) in the
+  test-infrastructure commit.
+- **Benchmarks** (`test_benchmarks.jl`, PkgJogger): port; measure
+  shadow/thunk preallocation (remember `make_zero!` on reused shadows —
+  Enzyme *accumulates* into `dx`; the thunk cache is keyed on input type
+  and fills on first `analyze`, not at construction).
+- **TTFX**: first-`analyze` latency on a VGG-scale composite,
+  before/after comparison against v3.
+- **Docs** (code-free commits): Literate rewrite with Lux; VGG composites
+  example via Boltz.jl (`Vision.VGG`); README; remove stale Tullio/LV
+  content (`basics.jl` advertises a package extension that no longer
+  exists; rewrite the `@tullio` custom-rule example in `developer.md`
+  with plain broadcasting/matmul).
+- **Release**: CHANGELOG, compat bounds (julia ≥ 1.10; pin Enzyme —
+  it lags new Julia minors; decide the CI matrix), tag v4.0.0.
 
-## Cross-task insights (phases 6–7)
+## Cross-task insights
 
 - **Lux `Parallel` does not wrap bare functions** (`Parallel(+, softmax, …)`
   is a `MethodError`) — wrap explicitly in `WrappedFunction`. `Chain` wraps
@@ -60,8 +66,8 @@ copy is identical). The port is near-mechanical:
   `using Lux: static`); a plain `Bool` in `setproperties` throws.
 - **LuxLib warns** when a model is applied in train mode outside AD (used
   for collecting BatchNorm stats in canonize tests) — harmless, prints once.
-- **Scratch env** at `<session-scratchpad>/env` (previous sessions used
-  `/private/tmp/claude-501/-Users-hill-…/1a40a751-…/scratchpad/env`) has the
+- **Scratch env** at
+  `/private/tmp/claude-501/-Users-hill-…/1a40a751-…/scratchpad/env` has the
   package dev'ed plus Lux, Functors, StableRNGs, ConstructionBase,
   ReferenceTests, JLD2, LinearAlgebra, Random — enough to `include` most
   test files directly for ~30 s smoke runs (run from `test/` so reference
@@ -69,9 +75,6 @@ copy is identical). The port is near-mechanical:
 - **Background `Pkg.test()` needs the repo as the active project** — run
   `julia -e 'using Pkg; Pkg.activate("<repo>"); Pkg.test()'`; a bare
   `Pkg.test()` inherits whatever cwd the shell last used.
-- Phase 7 note: `test/Manifest.toml` is a stale v3 leftover (Flux pins,
-  Oct 2024) that `Pkg.test` ignores — delete it in the test-infrastructure
-  commit to avoid confusion.
 
 ## Testing infrastructure
 
@@ -104,9 +107,8 @@ copy is identical). The port is near-mechanical:
   artifacts stand alone, trailer
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 
-## After Phase 6
+## After Phase 7
 
-Phase 7 (tests, docs, release) per PLAN.md — not yet started. Includes CNN
-reference regeneration (JLD2), Zygote-vs-Enzyme consistency testset,
-benchmarks/TTFX, Literate docs with Boltz.jl VGG, CHANGELOG and compat
-bounds for the v4.0.0 tag.
+Tag v4.0.0 — the port is complete. Out of scope for v4 (per PLAN
+decisions): GPU/Reactant, dual-framework Flux extensions, third-party AD
+backends.

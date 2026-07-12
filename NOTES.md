@@ -143,6 +143,11 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   DifferentiationInterface (never added — raw Enzyme by design); added
   Lux, Enzyme, Functors, ConstructionBase. Zygote survives as a
   *test-only* dependency to cross-check `layer_pullback`.
+- CRP (phase 6) kept the v3 algorithm unchanged: the analyzer's
+  `rules`/`layers`/`modified_layers` NamedTuples are unpacked positionally
+  with `values()` for the `k`-indexed backward loops, and activations come
+  from `get_activations` on the `FrozenLayer` NamedTuple. The flat-model
+  assumption (positional `layer::Int`) is now documented in the docstring.
 
 ## Test suite / reference values
 

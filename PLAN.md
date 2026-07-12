@@ -1,7 +1,7 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** Phases 1–5 complete; Phase 6 (CRP)
-next — see HANDOFF.md.
+**Branch:** `ah/enzyme` · **Status:** Phases 1–6 complete; Phase 7 (tests,
+docs, release) next — see HANDOFF.md.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
 simplifying the codebase along the way.
@@ -261,12 +261,15 @@ Design points:
       BatchNorm and `use_bias=false` layers (flipped via `Lux.static(true)`).
 
 ### Phase 6 — CRP
-- [ ] Port `crp.jl` (near-mechanical once backward pass is ported).
+- [x] Port `crp.jl` (near-mechanical once backward pass is ported).
+      NamedTuples unpacked positionally via `values()`; flat-model
+      assumption now documented in the `CRP` docstring.
 
 ### Phase 7 — Tests, docs, release
 - [ ] Port test models to Lux (StableRNG via `Lux.setup`); regenerate JLD2
       references.
-- [ ] Zygote-vs-Enzyme consistency testset for `layer_pullback` (Zygote test-only dep).
+- [x] Zygote-vs-Enzyme consistency testset for `layer_pullback` (Zygote test-only dep).
+      Landed with phase 2 (`test/test_autodiff.jl`, additive-first ordering).
 - [ ] Keep Aqua, ExplicitImports, JuliaFormatter tests.
 - [ ] Port PkgJogger benchmarks; measure shadow/thunk preallocation (remember
       `make_zero!` on reused shadows; thunk cache is per input type, first-call).
