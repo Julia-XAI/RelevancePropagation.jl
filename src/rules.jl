@@ -590,3 +590,29 @@ function lrp!(
     @. Rᵏ = aᵏ * (s - μₛ)
     return Rᵏ
 end
+
+#==========================#
+# Performance improvements #
+#==========================#
+
+# The following functions aren't strictly necessary – tests still pass when removing them.
+# However they improve performance on specific combinations of rule and layer types.
+
+# Rules that don't require layer information:
+for R in (ZeroRule, EpsilonRule)
+    for L in (DropoutLayer, ReshapingLayer)
+        @eval function lrp!(
+            Rᵏ, _rule::$R, _layer::FrozenLayer{<:$L}, _modified_layer, aᵏ, Rᵏ⁺¹
+        )
+            return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
+        end
+    end
+end
+
+function lrp!(Rᵏ, _rule::FlatRule, _layer::FrozenLayer{<:Dense}, _modified_layer, _aᵏ, Rᵏ⁺¹)
+    n = size(Rᵏ, 1) # number of input neurons connected to each output neuron
+    for i in axes(Rᵏ, 2) # samples in batch
+        fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
+    end
+    return Rᵏ
+end

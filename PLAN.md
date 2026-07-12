@@ -221,14 +221,19 @@ Design points:
 - [x] `ZeroRule` + `EpsilonRule`; one end-to-end MLP test green.
 
 ### Phase 3 — All rules
-- [ ] Port `modify_*` family to operate on `ps` NamedTuples.
-- [ ] Simple rules: `GammaRule`, `WSquareRule`, `FlatRule`.
-- [ ] Multi-variant rules (named-tuple-of-variants convention kept): `ZBoxRule`
+- [x] Port `modify_*` family to operate on `ps` NamedTuples.
+- [x] Simple rules: `GammaRule`, `WSquareRule`, `FlatRule`.
+- [x] Multi-variant rules (named-tuple-of-variants convention kept): `ZBoxRule`
       and `ZPlusRule` (single-seed pullbacks only); `AlphaBetaRule` and
       `GeneralizedGammaRule` via `layer_pullback_2seeds`.
-- [ ] `LayerNormRule` against Lux `LayerNorm`; `PassRule`.
-- [ ] Keep fast paths (`src/rules.jl:583-597`): Zero/Epsilon on dropout/reshaping
-      layers, FlatRule on Dense.
+- [x] `LayerNormRule` against Lux `LayerNorm`; `PassRule`.
+      Lux `LayerNorm` note: default `dims=Colon()` normalizes over *all* dims
+      (incl. batch), unlike Flux's per-sample `1:length(shape)`; the rule
+      follows the layer's `dims` and documents the difference.
+- [x] Keep fast paths: Zero/Epsilon on dropout/reshaping layers, FlatRule on
+      Dense.
+      The v3 rule reference JLD2 values stay valid (explicit StableRNG(123)
+      weights injected into Lux `ps`).
 
 ### Phase 4 — Dataflow + composites
 - [ ] `Chain`/`Parallel`/`SkipConnection` `lrp!` recursion with per-branch `ps`/`st`.
