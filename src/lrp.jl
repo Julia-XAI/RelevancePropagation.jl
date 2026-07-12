@@ -30,7 +30,9 @@ frozen_inner(f::FrozenLayer{<:SkipConnection}) = FrozenLayer(f.layer.layers, f.p
 
 # Construct the NamedTuple of modified layers by zipping rules and layers
 # along the model structure.
-function get_modified_layers(rules::NamedTuple, frozen::FrozenLayer{<:Union{Chain,Parallel}})
+function get_modified_layers(
+    rules::NamedTuple, frozen::FrozenLayer{<:Union{Chain,Parallel}}
+)
     children = frozen_children(frozen)
     if keys(rules) != keys(children)
         throw(
@@ -244,7 +246,9 @@ function lrp!(
     return Rᵏ .= sum(Rᵏs)
 end
 
-function lrp_skip_connection!(Rᵏ, rules, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹)
+function lrp_skip_connection!(
+    Rᵏ, rules, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
+)
     inner = frozen_inner(sc)
 
     # Compute contributions of the wrapped layer and the skip connection to the
@@ -271,8 +275,15 @@ end
 # `FrozenLayer{<:SkipConnection}`. Route each rule type with its own generic
 # `lrp!(Rᵏ, rule, layer::FrozenLayer, ...)` method explicitly to the skip
 # connection handler to avoid method ambiguities.
-for R in
-    (:NamedTuple, :AbstractLRPRule, :PassRule, :ZBoxRule, :ZPlusRule, :AlphaBetaRule, :GeneralizedGammaRule)
+for R in (
+    :NamedTuple,
+    :AbstractLRPRule,
+    :PassRule,
+    :ZBoxRule,
+    :ZPlusRule,
+    :AlphaBetaRule,
+    :GeneralizedGammaRule,
+)
     @eval function lrp!(
         Rᵏ, rules::$R, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
     )

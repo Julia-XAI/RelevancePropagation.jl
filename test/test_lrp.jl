@@ -13,16 +13,16 @@ batch = cat(input, rand(StableRNG(2), Float32, 10, 1); dims=2)
 
 @testset "Analyzer construction" begin
     analyzer = LRP(model, ps, st)
-    @test analyzer.rules ==
-        (layer_1=ZeroRule(), layer_2=ZeroRule(), layer_3=ZeroRule())
+    @test analyzer.rules == (layer_1=ZeroRule(), layer_2=ZeroRule(), layer_3=ZeroRule())
 
     rules = [ZeroRule(), EpsilonRule(), ZeroRule()]
     analyzer = LRP(model, ps, st, rules)
-    @test analyzer.rules ==
-        (layer_1=ZeroRule(), layer_2=EpsilonRule(), layer_3=ZeroRule())
+    @test analyzer.rules == (layer_1=ZeroRule(), layer_2=EpsilonRule(), layer_3=ZeroRule())
     @test_throws ArgumentError LRP(model, ps, st, [ZeroRule(), ZeroRule()])
 
-    analyzer = LRP(model, ps, st, (; layer_1=ZeroRule(), layer_2=ZeroRule(), layer_3=ZeroRule()))
+    analyzer = LRP(
+        model, ps, st, (; layer_1=ZeroRule(), layer_2=ZeroRule(), layer_3=ZeroRule())
+    )
     @test analyzer.rules.layer_2 == ZeroRule()
     @test_throws ArgumentError LRP(
         model, ps, st, (; foo=ZeroRule(), bar=ZeroRule(), baz=ZeroRule())
@@ -117,7 +117,9 @@ end
     @test e2_s.val ≈ reshape([5 / 27 14 / 27], 2, 1)
 
     # A nested Chain yields the same relevances as its flat equivalent
-    model_flat = Chain(Dense(10 => 8, relu), Dense(8 => 8, relu), Dense(8 => 4, relu), Dense(4 => 3))
+    model_flat = Chain(
+        Dense(10 => 8, relu), Dense(8 => 8, relu), Dense(8 => 4, relu), Dense(4 => 3)
+    )
     ps_flat, st_flat = Lux.setup(StableRNG(456), model_flat)
     model_nested = Chain(
         Dense(10 => 8, relu), Chain(Dense(8 => 8, relu), Dense(8 => 4, relu)), Dense(4 => 3)
@@ -147,7 +149,8 @@ end
 
     # SkipConnection wrapping a Chain takes a nested rules NamedTuple
     model_sc = Chain(
-        Dense(10 => 10, relu), SkipConnection(Chain(Dense(10 => 8, relu), Dense(8 => 10)), +)
+        Dense(10 => 10, relu),
+        SkipConnection(Chain(Dense(10 => 8, relu), Dense(8 => 10)), +),
     )
     ps_sc, st_sc = Lux.setup(StableRNG(789), model_sc)
     rules_sc = (; layer_1=ZeroRule(), layer_2=(; layer_1=ZeroRule(), layer_2=EpsilonRule()))

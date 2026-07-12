@@ -58,9 +58,7 @@ c11 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
 # each layer like `ps`/`st`; SkipConnection stays transparent.
 @test layer_indices(c2) == (; layer_1=KeyPath(:layer_1), layer_2=KeyPath(:layer_2))
 @test layer_indices(c3) == (;
-    layer_1=(;
-        layer_1=KeyPath(:layer_1, :layer_1), layer_2=KeyPath(:layer_1, :layer_2)
-    ),
+    layer_1=(; layer_1=KeyPath(:layer_1, :layer_1), layer_2=KeyPath(:layer_1, :layer_2)),
     layer_2=KeyPath(:layer_2),
 )
 @test layer_indices(c7) == (;

@@ -127,9 +127,7 @@ end
         W = [3.0 4.0; 5.0 6.0]
         b = [7.0, 8.0]
         aᵏ = reshape([1.0 2.0], 2, 1)
-        composite = Composite(
-            GlobalTypeMap(NoOpLayer => PassRule(), Dense => ZeroRule())
-        )
+        composite = Composite(GlobalTypeMap(NoOpLayer => PassRule(), Dense => ZeroRule()))
 
         dense = Dense(2 => 2, relu)
         ps_dense = (; weight=W, bias=b)
@@ -223,9 +221,7 @@ end
         a⁻ = [-1.0, 0.0]
         W = [1.0 -4.0; 2.0 0.0]
         b = [-2.0, 3.0]
-        layer = FrozenLayer(
-            Dense(2 => 2, leakyrelu), (; weight=W, bias=b), NamedTuple()
-        ) # leakyrelu defaults to a=0.01
+        layer = FrozenLayer(Dense(2 => 2, leakyrelu), (; weight=W, bias=b), NamedTuple()) # leakyrelu defaults to a=0.01
         Rᵏ⁺¹ = [-0.07; 1.0]
         Rᵏ⁺¹⁺ = [0.0; 1.0]
         Rᵏ⁺¹⁻ = [-0.07; 0.0]
@@ -281,9 +277,7 @@ end
         ###################
         # relu activation #
         ###################
-        layer = FrozenLayer(
-            LayerNorm((2, 2), relu; epsilon=0.0f0), ps_affine, NamedTuple()
-        )
+        layer = FrozenLayer(LayerNorm((2, 2), relu; epsilon=0.0f0), ps_affine, NamedTuple())
 
         # not canonized
         modified_layer = modify_layer(rule, layer)
@@ -329,9 +323,7 @@ end
         # no affine transformation, but relu #
         ######################################
         layer = FrozenLayer(
-            LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0),
-            NamedTuple(),
-            NamedTuple(),
+            LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0), NamedTuple(), NamedTuple()
         )
 
         # not canonized
@@ -432,9 +424,8 @@ ALL_RULES_PORTED = all(
                 lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
                 @test typeof(Rᵏ) == typeof(aᵏ)
                 @test size(Rᵏ) == size(aᵏ)
-                @test_reference "references/rules/$rulename/$layername.jld2" Dict(
-                    "R" => Rᵏ
-                ) by = (r, a) -> isapprox(r["R"], a["R"]; atol=1e-5, rtol=0.02)
+                @test_reference "references/rules/$rulename/$layername.jld2" Dict("R" => Rᵏ) by =
+                    (r, a) -> isapprox(r["R"], a["R"]; atol=1e-5, rtol=0.02)
             end
         end
 
@@ -499,16 +490,8 @@ ALL_RULES_PORTED = all(
         insize = (6, 6, 3, batchsize)
         aᵏ = pseudorandn(insize...)
         other_layers = Dict(
-            "Conv" => FrozenLayer(
-                Conv((3, 3), cin => cout),
-                (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)),
-                NamedTuple(),
-            ),
-            "Conv_relu" => FrozenLayer(
-                Conv((3, 3), cin => cout, relu),
-                (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)),
-                NamedTuple(),
-            ),
+            "Conv"           => FrozenLayer(Conv((3, 3), cin => cout), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
+            "Conv_relu"      => FrozenLayer(Conv((3, 3), cin => cout, relu), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
             "MaxPool"        => frozen_testmode(MaxPool((3, 3))),
             "MeanPool"       => frozen_testmode(MeanPool((3, 3))),
             "GlobalMaxPool"  => frozen_testmode(GlobalMaxPool()),

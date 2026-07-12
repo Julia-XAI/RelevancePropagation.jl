@@ -68,9 +68,7 @@ a width-2 `BatchDuplicated` shadow.
 """
 function layer_pullback_2seeds(f::F, x::AbstractArray) where {F<:FrozenLayer}
     mode = ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))
-    fwd, rev = autodiff_thunk(
-        mode, Const{F}, BatchDuplicated, BatchDuplicated{typeof(x),2}
-    )
+    fwd, rev = autodiff_thunk(mode, Const{F}, BatchDuplicated, BatchDuplicated{typeof(x),2})
     dx₁, dx₂ = make_zero(x), make_zero(x)
     tape, z, dzs = fwd(Const(f), BatchDuplicated(x, (dx₁, dx₂)))
     function back2(s₁, s₂)

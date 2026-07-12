@@ -504,9 +504,7 @@ function modify_layer(rule::GeneralizedGammaRule, layer::FrozenLayer)
     )
 end
 
-function lrp!(
-    Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹
-)
+function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
@@ -558,9 +556,7 @@ normalization v3 (Flux) applied.
 struct LayerNormRule <: AbstractLRPRule end
 is_compatible(::LayerNormRule, ::FrozenLayer{<:LayerNorm}) = true
 
-function lrp!(
-    Rᵏ, ::LayerNormRule, f::FrozenLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹
-)
+function lrp!(Rᵏ, ::LayerNormRule, f::FrozenLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹)
     layer = f.layer
     dims = layer.dims # Colon() means statistics over all dimensions
     μₐ = mean(aᵏ; dims=dims)

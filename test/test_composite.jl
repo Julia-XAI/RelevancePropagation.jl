@@ -167,7 +167,9 @@ composite5 = Composite(LayerMap(2, EpsilonRule())) # prefix matches the whole su
 # Bare functions in a Chain are wrapped in `WrappedFunction`;
 # type maps match the wrapped function itself.
 model6 = Chain(Dense(2 => 2, relu), identity)
-composite6 = Composite(GlobalTypeMap(typeof(identity) => PassRule(), Dense => EpsilonRule()))
+composite6 = Composite(
+    GlobalTypeMap(typeof(identity) => PassRule(), Dense => EpsilonRule())
+)
 @test lrp_rules(model6, composite6) == (; layer_1=EpsilonRule(), layer_2=PassRule())
 
 # Show reference tests require show.jl and the default composites from

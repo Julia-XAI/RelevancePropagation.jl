@@ -43,7 +43,9 @@ layer_indices(model) = layer_indices(model, KeyPath())
 function layer_indices(model::Union{Chain,Parallel}, path::KeyPath)
     layers = model.layers
     ks = keys(layers)
-    return NamedTuple{ks}(map(k -> layer_indices(getproperty(layers, k), KeyPath(path, k)), ks))
+    return NamedTuple{ks}(
+        map(k -> layer_indices(getproperty(layers, k), KeyPath(path, k)), ks)
+    )
 end
 # `SkipConnection` is an `AbstractLuxWrapperLayer`:
 # its `ps`/`st` pass through to the wrapped layer directly.
@@ -119,7 +121,9 @@ struct LayerMap{K<:KeyPath,R<:AbstractLRPRule} <: AbstractCompositeMap
     index::K
     rule::R
 end
-LayerMap(index::Union{Integer,Tuple}, rule::AbstractLRPRule) = LayerMap(keypath(index), rule)
+function LayerMap(index::Union{Integer,Tuple}, rule::AbstractLRPRule)
+    LayerMap(keypath(index), rule)
+end
 
 keypath(i::Integer) = KeyPath(Symbol(:layer_, i))
 keypath(inds::Tuple) = KeyPath(map(i -> Symbol(:layer_, i), inds)...)
