@@ -1,7 +1,7 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** Phase 1 (spike) and Phase 2 (core skeleton)
-complete; Phase 3 (rules) next.
+**Branch:** `ah/enzyme` · **Status:** Phases 1–4 complete; Phase 5 (model
+utilities) next — see HANDOFF.md.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
 simplifying the codebase along the way.
@@ -236,9 +236,19 @@ Design points:
       weights injected into Lux `ps`).
 
 ### Phase 4 — Dataflow + composites
-- [ ] `Chain`/`Parallel`/`SkipConnection` `lrp!` recursion with per-branch `ps`/`st`.
-- [ ] Composites: TypeMaps on Lux layer types; `LayerMap` via `KeyPath`.
-- [ ] Rewrite `show.jl` for NamedTuple rules (shrinks).
+- [x] `Chain`/`Parallel`/`SkipConnection` `lrp!` recursion with per-branch `ps`/`st`.
+      `SkipConnection` is an `AbstractLuxWrapperLayer{:layers}`, transparent in
+      `ps`/`st`/rules — plain rules paired with `FrozenLayer{<:SkipConnection}`
+      are ambiguous against the rule-specific `lrp!` methods, resolved with
+      `@eval`-generated routing methods onto `lrp_skip_connection!`.
+- [x] Composites: TypeMaps on Lux layer types; `LayerMap` via `KeyPath`.
+      v3 semantics preserved exactly: positional primitives (`RangeMap`,
+      `RangeTypeMap`, `FirstNTypeMap`) use *top-level* positions, `LayerMap`
+      matches by `KeyPath` prefix, last matching primitive wins,
+      `WrappedFunction` is unwrapped for type matching. `lrp_rules(model,
+      composite)` needs no `ps`/`st`.
+- [x] Rewrite `show.jl` for NamedTuple rules (shrinks).
+      Show references regenerated; presets gained `NoOpLayer => PassRule()`.
 
 ### Phase 5 — Model utilities
 - [ ] Model checks / `LRP_CONFIG` on Lux types (`AbstractLuxLayer`, `WrappedFunction`).
