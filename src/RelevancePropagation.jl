@@ -25,8 +25,6 @@ using Statistics: mean, std
 include("bibliography.jl")
 include("layer_types.jl")
 include("layer_utils.jl")
-include("chain_utils.jl")
-include("modelindex.jl")
 include("utils.jl")
 include("canonize.jl")
 include("checks.jl")
