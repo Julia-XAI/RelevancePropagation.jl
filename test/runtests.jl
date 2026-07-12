@@ -46,16 +46,17 @@ using Test
         @info "Testing analyzers on batches..."
         include("test_batches.jl")
     end
+    @testset "Linting" begin
+        @info "Testing linting..."
+        include("test_linting.jl")
+    end
 
     # The v3 test files below depend on functionality that is not ported yet
     # (v4.0.0 Lux/Enzyme rewrite, see PLAN.md). They cannot be included until
     # their phase lands, so they are marked broken here instead of being
     # removed. Ports replace these markers with `include`s.
     @testset verbose = true "Not yet ported" begin
-        for file in [
-            "test_benchmarks.jl: PkgJogger benchmark suite (phase 7)",
-            "test_linting.jl: JuliaFormatter/Aqua/ExplicitImports (phase 7)",
-        ]
+        for file in ["test_benchmarks.jl: PkgJogger benchmark suite (phase 7)"]
             @testset "$file" begin
                 @test_broken false
             end
