@@ -19,7 +19,7 @@ using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
 using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
 
 using ConstructionBase: setproperties
-using Lux: static
+using Static: static
 using Functors: KeyPath
 using NNlib: relu, gelu, swish, mish, softmax, softmax!
 using Markdown: @md_str
