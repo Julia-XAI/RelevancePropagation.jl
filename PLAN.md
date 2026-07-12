@@ -163,18 +163,50 @@ Design points:
 ## Phases
 
 ### Phase 1 — Spike (de-risk first)
-- [ ] Scratch script: `autodiff_thunk`/`ReverseSplitWithPrimal` through
+- [x] Scratch script: `autodiff_thunk`/`ReverseSplitWithPrimal` through
       `FrozenLayer`-wrapped `Dense`, `Conv`, `MaxPool`, testmode `BatchNorm`,
       `LayerNorm` on CPU; compare against Zygote VJPs. Include the nonlinear
       surface (pooling, testmode BN, activation functions) — see AD core notes.
-- [ ] Two-seed variant: `ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))` +
+- [x] Two-seed variant: `ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))` +
       width-2 `BatchDuplicated`; validate the `layer_pullback_2seeds` shape.
-- [ ] Check whether `set_runtime_activity` is needed anywhere (ideally not).
-- [ ] Verify Lux API details assumed in this plan: `Scale` parameter names;
+- [x] Check whether `set_runtime_activity` is needed anywhere (ideally not).
+- [x] Verify Lux API details assumed in this plan: `Scale` parameter names;
       whether Lux 1.x `Chain` auto-flattens nested chains; `CrossCor` ↔
       `Conv(cross_correlation=true)` type-level implications for `ConvLayer` union;
       Lux `LayerNorm` internals (`ps.scale`/`ps.bias`, normalized-dims semantics)
       for `LayerNormRule` and `canonize_split`.
+
+**Spike findings (Enzyme v0.13.181, Lux v1.31.4, Julia 1.12.6):**
+
+1. Width-1 split-mode `layer_pullback` matches Zygote VJPs for *every* layer
+   type in one session: `Dense` (identity/relu/gelu/no-bias), `Scale`, `Conv`
+   (incl. `cross_correlation=true`), `ConvTranspose`, `MaxPool`, `MeanPool`,
+   `Global*Pool`, `Adaptive*Pool`, testmode `BatchNorm` (incl. relu),
+   `LayerNorm` (incl. relu, `affine=false`), `FlattenLayer`, testmode
+   `Dropout`, `WrappedFunction`.
+2. Width-2 `layer_pullback_2seeds` matches Zygote on weight-bias layers
+   (`Dense`, `Scale`, `Conv`, `ConvTranspose`) — the only layers that need it
+   (`AlphaBetaRule`/`GeneralizedGammaRule` domain). **Compiling width-2 thunks
+   for pooling/BatchNorm layers nondeterministically aborts Julia** with an
+   Enzyme assertion (`AdjointGenerator.h:6478`, boxed-Float32 shadow) — the
+   implementation must never request width-2 thunks for non-weight layers.
+3. `set_runtime_activity` is not needed anywhere.
+4. Lux API details: parameter naming is uniformly `weight`/`bias` (also for
+   `Scale`, so the Flux `get_weight` special case dies); `use_bias=false` omits
+   the `bias` key from `ps`; `Conv(cross_correlation=true)` is the *same*
+   `Conv` type (`ConvLayer = Union{Conv,ConvTranspose}`); Lux `Chain` does
+   **not** auto-flatten nested chains (joint `flatten_model` stays necessary);
+   `LayerNorm` has fields `(shape, activation, epsilon, dims, affine)` and
+   `ps = (scale, bias)` sized `(shape..., 1)`, `affine=false` gives empty `ps`;
+   `BatchNorm` `ps = (scale, bias)`, `st = (running_mean, running_var,
+   training)`; `ConstructionBase.setproperties(layer, (; activation=identity))`
+   works on `Dense`/`Conv`/`Scale`/`BatchNorm`/`LayerNorm` and the result
+   differentiates fine; `Parallel` has fields `(connection, layers, name)` with
+   `ps` mirroring `layers` keys; `SkipConnection` is an
+   `AbstractLuxWrapperLayer{:layers}`, so its `ps`/`st` pass through to the
+   wrapped layer *directly* (no `:layers` key); pooling layers are distinct
+   wrapper types (unions work); bare functions in a `Chain` become
+   `WrappedFunction{typeof(f)}` (softmax checks must handle this).
 
 ### Phase 2 — Core skeleton
 - [ ] Swap deps in Project.toml (add Lux, Enzyme, Functors; drop Flux, Zygote,
