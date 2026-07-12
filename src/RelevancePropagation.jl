@@ -43,7 +43,7 @@ export LRP
 # LRP rules
 export AbstractLRPRule
 export LRP_CONFIG
-export ZeroRule, EpsilonRule
+export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer

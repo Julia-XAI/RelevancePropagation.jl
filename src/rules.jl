@@ -194,3 +194,80 @@ struct EpsilonRule{T<:Real} <: AbstractLRPRule
 end
 modify_denominator(r::EpsilonRule, d) = stabilize_denom(d, r.ϵ)
 is_compatible(::EpsilonRule, layer::FrozenLayer) = true # compatible with all layer types
+
+"""
+    GammaRule([gamma=$(LRP_DEFAULT_GAMMA)])
+
+LRP-``γ`` rule. Commonly used on lower layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\frac{(W_{ij}+\\gamma W_{ij}^+)a_j^k}
+    {\\sum_l(W_{il}+\\gamma W_{il}^+)a_l^k+(b_i+\\gamma b_i^+)} R_i^{k+1}
+```
+
+# Optional arguments
+- `gamma`: Optional multiplier for added positive weights, defaults to `$(LRP_DEFAULT_GAMMA)`.
+
+# References
+- $REF_MONTAVON_OVERVIEW
+"""
+struct GammaRule{T<:Real} <: AbstractLRPRule
+    γ::T
+    GammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
+end
+function modify_parameters(r::GammaRule, param::AbstractArray)
+    γ = convert(eltype(param), r.γ)
+    return @. param + γ * keep_positive(param)
+end
+
+# Internally used for GeneralizedGammaRule:
+struct NegativeGammaRule{T<:Real} <: AbstractLRPRule
+    γ::T
+    NegativeGammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
+end
+function modify_parameters(r::NegativeGammaRule, param::AbstractArray)
+    γ = convert(eltype(param), r.γ)
+    return @. param + γ * keep_negative(param)
+end
+
+"""
+    WSquareRule()
+
+LRP-``w²`` rule. Commonly used on the first layer when values are unbounded.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\frac{W_{ij}^2}{\\sum_l W_{il}^2} R_i^{k+1}
+```
+
+# References
+- $REF_MONTAVON_DTD
+"""
+struct WSquareRule <: AbstractLRPRule end
+modify_input(::WSquareRule, input) = ones_like(input)
+modify_weight(::WSquareRule, w) = w .^ 2
+modify_bias(::WSquareRule, b) = zero(b)
+
+"""
+    FlatRule()
+
+LRP-Flat rule. Similar to the [`WSquareRule`](@ref), but with all weights set to one
+and all bias terms set to zero.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\frac{1}{\\sum_l 1} R_i^{k+1} = \\sum_i\\frac{1}{n_i} R_i^{k+1}
+```
+where ``n_i`` is the number of input neurons connected to the output neuron at index ``i``.
+
+# References
+- $REF_LAPUSCHKIN_CLEVER_HANS
+"""
+struct FlatRule <: AbstractLRPRule end
+modify_input(::FlatRule, input) = ones_like(input)
+modify_weight(::FlatRule, w) = ones_like(w)
+modify_bias(::FlatRule, b) = zero(b)
