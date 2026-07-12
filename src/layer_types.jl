@@ -1,14 +1,18 @@
 """Union type for dataflow layers."""
 const DataflowLayer = Union{Chain,Parallel,SkipConnection}
 
-"""Union type for convolutional layers."""
-const ConvLayer = Union{Conv,ConvTranspose,CrossCor}
+"""Union type for convolutional layers.
+
+Cross-correlation layers are constructed in Lux via `Conv(...; cross_correlation=true)`
+and are therefore covered by `Conv`.
+"""
+const ConvLayer = Union{Conv,ConvTranspose}
 
 """Union type for dropout layers."""
-const DropoutLayer = Union{Dropout,typeof(dropout),AlphaDropout}
+const DropoutLayer = Union{Dropout,AlphaDropout,VariationalHiddenDropout}
 
-"""Union type for reshaping layers such as `flatten`."""
-const ReshapingLayer = Union{typeof(Flux.flatten),typeof(MLUtils.flatten)}
+"""Union type for reshaping layers such as `FlattenLayer`."""
+const ReshapingLayer = Union{FlattenLayer,ReshapeLayer}
 
 """Union type for max pooling layers."""
 const MaxPoolLayer = Union{MaxPool,AdaptiveMaxPool,GlobalMaxPool}
@@ -34,7 +38,8 @@ const SoftmaxActivation = Union{typeof(softmax),typeof(softmax!)}
 const LRPSupportedActivation = Union{typeof(identity),ReluLikeActivation}
 
 """Union type for layers that are allowed by default in "deep rectifier networks".
-This includes the usage of allowed activation functions as layers.
+This includes the usage of allowed activation functions as layers,
+which Lux wraps in `WrappedFunction`.
 """
 const LRPSupportedLayer = Union{
     DataflowLayer,
@@ -46,5 +51,6 @@ const LRPSupportedLayer = Union{
     NormalizationLayer,
     ReshapingLayer,
     PoolingLayer,
+    NoOpLayer,
     LRPSupportedActivation,
 }
