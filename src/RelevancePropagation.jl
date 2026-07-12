@@ -60,6 +60,9 @@ export lrp_rules, show_layer_indices
 export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
 export EpsilonAlpha2Beta1Flat
 
+# Model utilities
+export strip_softmax
+
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
 

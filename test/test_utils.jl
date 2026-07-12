@@ -111,22 +111,40 @@ mc   = @inferred masked_copy(A, mask)
     Chain(SkipConnection(Chain(NoOpLayer()), +))
 @test_skip first(flatten_model(Chain(Chain(Dense(5 => 5), BatchNorm(5))))).layers isa Tuple
 
-# strip_softmax (phase 5): model-only in v4, `ps` stays untouched.
-@test_skip strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2))
-@test_skip strip_softmax(Chain(Dense(2 => 2, softmax))) == Chain(Dense(2 => 2, identity))
-@test_skip strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)))) ==
-    Chain(Chain(Dense(2 => 2)), Chain(Chain(identity)))
-@test_skip strip_softmax(Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, softmax)))) ==
+# strip_softmax: model-only in v4, `ps` stays untouched.
+# A bare output softmax is replaced by `NoOpLayer`, preserving chain length.
+@test strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2), NoOpLayer())
+@test strip_softmax(Chain(Dense(2 => 2, softmax))) == Chain(Dense(2 => 2, identity))
+@test strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)))) ==
+    Chain(Chain(Dense(2 => 2)), Chain(Chain(NoOpLayer())))
+@test strip_softmax(Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, softmax)))) ==
     Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, identity)))
 # don't do anything if there is no softmax at the end
-@test_skip strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))) ==
+@test strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))) ==
     Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))
-@test_skip strip_softmax(Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))) ==
+@test strip_softmax(Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))) ==
     Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))
 # Ignore output softmax if in Parallel or SkipConnection dataflow layer
-@test_skip strip_softmax(
-    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), Parallel(+, softmax, softmax))
-) == Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), Parallel(+, softmax, softmax))
-@test_skip strip_softmax(
-    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), SkipConnection(softmax, +))
-) == Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), SkipConnection(softmax, +))
+# (unlike `Chain`, they require explicit `WrappedFunction` wrapping)
+@test strip_softmax(
+    Chain(
+        Dense(2 => 2, softmax),
+        Chain(Dense(2 => 2, relu)),
+        Parallel(+, WrappedFunction(softmax), WrappedFunction(softmax)),
+    ),
+) == Chain(
+    Dense(2 => 2, softmax),
+    Chain(Dense(2 => 2, relu)),
+    Parallel(+, WrappedFunction(softmax), WrappedFunction(softmax)),
+)
+@test strip_softmax(
+    Chain(
+        Dense(2 => 2, softmax),
+        Chain(Dense(2 => 2, relu)),
+        SkipConnection(WrappedFunction(softmax), +),
+    ),
+) == Chain(
+    Dense(2 => 2, softmax),
+    Chain(Dense(2 => 2, relu)),
+    SkipConnection(WrappedFunction(softmax), +),
+)
