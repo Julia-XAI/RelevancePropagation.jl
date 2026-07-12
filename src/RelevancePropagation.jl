@@ -34,9 +34,9 @@ include("checks.jl")
 include("rules.jl")
 include("composite.jl")
 include("lrp.jl")
+include("show.jl")
+include("composite_presets.jl") # uses show.jl
 # Not yet ported to Lux/Enzyme (v4.0.0 rewrite, see PLAN.md):
-# include("show.jl")              # phase 4
-# include("composite_presets.jl") # phase 4
 # include("canonize.jl")          # phase 5
 # include("crp.jl")               # phase 6
 
@@ -55,6 +55,10 @@ export LayerMap, GlobalMap, RangeMap, FirstLayerMap, LastLayerMap
 export GlobalTypeMap, RangeTypeMap, FirstLayerTypeMap, LastLayerTypeMap
 export FirstNTypeMap
 export lrp_rules, show_layer_indices
+
+# Default composites
+export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
+export EpsilonAlpha2Beta1Flat
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
