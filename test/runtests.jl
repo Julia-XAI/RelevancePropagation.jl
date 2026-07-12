@@ -38,17 +38,21 @@ using Test
         @info "Testing CRP..."
         include("test_crp.jl")
     end
+    @testset "CNN" begin
+        @info "Testing analyzers on CNN..."
+        include("test_cnn.jl")
+    end
+    @testset "Batches" begin
+        @info "Testing analyzers on batches..."
+        include("test_batches.jl")
+    end
 
-    # The v3 test files below depend on Flux and on functionality that is not
-    # ported yet (v4.0.0 Lux/Enzyme rewrite, see PLAN.md). They cannot be
-    # included until their phase lands, so they are marked broken here instead
-    # of being removed. Ports replace these markers with `include`s.
-    # (Restored v3 tests for unported rules and model utilities live as skipped
-    # tests inside test_rules.jl, test_utils.jl and test_chain_utils.jl.)
+    # The v3 test files below depend on functionality that is not ported yet
+    # (v4.0.0 Lux/Enzyme rewrite, see PLAN.md). They cannot be included until
+    # their phase lands, so they are marked broken here instead of being
+    # removed. Ports replace these markers with `include`s.
     @testset verbose = true "Not yet ported" begin
         for file in [
-            "test_cnn.jl: CNN reference tests (phase 7)",
-            "test_batches.jl: batch consistency on CNN (phase 7)",
             "test_benchmarks.jl: PkgJogger benchmark suite (phase 7)",
             "test_linting.jl: JuliaFormatter/Aqua/ExplicitImports (phase 7)",
         ]
