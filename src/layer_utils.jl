@@ -1,46 +1,57 @@
 """
     activation_fn(layer)
 
-Return activation function of the layer.
-In case the layer is unknown or no activation function is found, `nothing` is returned.
+Return activation function of a Lux layer.
+In case the layer is unknown or has no activation function, `nothing` is returned.
 """
-activation_fn(layer) = nothing
-activation_fn(l::Dense)         = l.σ
-activation_fn(l::Scale)         = l.σ
-activation_fn(l::Conv)          = l.σ
-activation_fn(l::CrossCor)      = l.σ
-activation_fn(l::ConvTranspose) = l.σ
-activation_fn(l::BatchNorm)     = l.λ
-activation_fn(l::LayerNorm)     = l.λ
-activation_fn(l::InstanceNorm)  = l.λ
-activation_fn(l::GroupNorm)     = l.λ
-
-has_weight(layer) = hasproperty(layer, :weight)
-has_weight(::Scale) = true
-get_weight(layer) = layer.weight
-get_weight(l::Scale) = l.scale
-
-has_bias(layer) = hasproperty(layer, :bias)
-get_bias(layer) = layer.bias
-
-has_weight_and_bias(layer) = has_weight(layer) && has_bias(layer)
+activation_fn(layer) = hasfield(typeof(layer), :activation) ? layer.activation : nothing
+activation_fn(f::FrozenLayer) = activation_fn(f.layer)
 
 """
-    copy_layer(layer, W, b, [σ=identity])
+    remove_activation(layer)
 
-Copy layer using weights `W` and `b`. The activation function `σ` can also be set,
-defaulting to `identity`.
+Return a copy of the Lux layer with its activation function set to `identity`.
+Layers without an activation function are returned unchanged.
 """
-copy_layer(::Dense, W, b; σ=identity) = Dense(W, b, σ)
-copy_layer(::Scale, W, b; σ=identity) = Scale(W, b, σ)
-function copy_layer(l::Conv, W, b; σ=identity)
-    return Conv(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation, groups=l.groups)
+function remove_activation(layer)
+    isnothing(activation_fn(layer)) && return layer
+    return setproperties(layer, (; activation=identity))
 end
-function copy_layer(l::ConvTranspose, W, b; σ=identity)
-    return ConvTranspose(
-        W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation, groups=l.groups
-    )
-end
-function copy_layer(l::CrossCor, W, b; σ=identity)
-    return CrossCor(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation)
-end
+
+# Parameters live in `ps`, whose entries Lux names uniformly:
+# `weight` and `bias` for all layers modified by LRP rules (`Dense`, `Scale`,
+# convolutions). Layers constructed with `use_bias=false` have no `bias` key.
+has_weight(f::FrozenLayer) = haskey(f.ps, :weight)
+has_bias(f::FrozenLayer) = haskey(f.ps, :bias)
+
+# Structure helpers for walking Lux models.
+# `Chain` and `Parallel` store their children in a `layers` NamedTuple that
+# `ps` and `st` mirror; `SkipConnection` is an `AbstractLuxWrapperLayer` whose
+# `ps`/`st` pass through to the wrapped layer directly.
+children_layers(c::Chain) = values(c.layers)
+children_layers(p::Parallel) = values(p.layers)
+children_layers(s::SkipConnection) = (s.layers,)
+
+"""
+    chainall(f, model)
+
+Determines whether `f` returns `true` for all layers in a Lux model.
+"""
+chainall(f, layer) = f(layer)
+chainall(f, model::DataflowLayer) = all(chainall(f, l) for l in children_layers(model))
+
+"""
+    first_element(model)
+
+Returns first layer of a Lux `Chain`, descending into nested `Chain`s.
+"""
+first_element(c::Chain) = first_element(first(values(c.layers)))
+first_element(layer) = layer
+
+"""
+    last_element(model)
+
+Returns last layer of a Lux `Chain`, descending into nested `Chain`s.
+"""
+last_element(c::Chain) = last_element(last(values(c.layers)))
+last_element(layer) = layer
