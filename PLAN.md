@@ -27,6 +27,13 @@ expl = analyze(input, analyzer)
   (never w.r.t. parameters), implemented with **raw Enzyme** — no
   DifferentiationInterface middle layer (decided: the port is Lux+Enzyme specific,
   and raw Enzyme gives more control).
+- The VJP is **not always through a linearized layer**: for layers without
+  weight/bias, `modify_layer` returns the original layer unchanged
+  (`src/rules.jl:129`), so under Zero/Epsilon rules the pullback runs through
+  max-pooling, testmode BatchNorm, and bare activation functions *including their
+  nonlinearity* (which is what makes ReLU behave as pass-through). Enzyme's
+  differentiation surface includes these nonlinear layers — hence the Phase 1
+  spike list.
 
 ### AD core: one Enzyme helper
 
@@ -36,11 +43,16 @@ incantations live in a single file; rules stay readable.
 
 ```julia
 # Sketch — the only place Enzyme appears in the package
-function layer_pullback(f::F, x::AbstractArray) where {F}   # f = StatefulLuxLayer(layer, ps_modified, st)
+struct FrozenLayer{L,P,S}   # immutable → genuinely safe to annotate `Const`
+    layer::L; ps::P; st::S
+end
+(f::FrozenLayer)(x) = first(Lux.apply(f.layer, x, f.ps, f.st))
+
+function layer_pullback(f::F, x::AbstractArray) where {F<:FrozenLayer}
     fwd, rev = autodiff_thunk(ReverseSplitWithPrimal, Const{F}, Duplicated, Duplicated{typeof(x)})
     dx = make_zero(x)
     tape, z, dz = fwd(Const(f), Duplicated(x, dx))
-    back(s) = (dz .= s; rev(Const(f), Duplicated(x, dx), tape); dx)
+    back(s) = (dz .= s; rev(Const(f), Duplicated(x, dx), tape); dx)   # call once per pullback
     return z, back
 end
 ```
@@ -55,26 +67,52 @@ Design points:
    `GeneralizedGammaRule` reuse one pullback with two seeds
    (`back⁺(sᵅ)`, `back⁺(sᵝ)` — `src/rules.jl:413-416`). Re-invoking a reverse thunk
    on the same tape is unsupported; a width-2 `BatchDuplicated` shadow does both
-   seeds in one forward+reverse.
-3. **Preallocated shadows / cached thunks.** `LRP` precomputes modified layers at
-   construction; `dx` shadow buffers and thunks can be preallocated per layer.
-   Measure with the existing PkgJogger suite.
-4. **Activity is trivial.** Wrap `(layer, ps_modified, st)` in a `StatefulLuxLayer`
-   annotated `Const` — ps/st constant by construction; same pattern as Lux's own
-   Enzyme docs. NNlib ships an EnzymeCore extension with custom rules for
-   `conv!`/`pool!`, so CNN hot paths don't rely on Enzyme differentiating im2col.
+   seeds in one forward+reverse. Details:
+   - The width lives in the *mode*, not just the annotations:
+     `ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))`.
+   - This is a **second helper with its own shape** — `z, back2 =
+     layer_pullback_2seeds(f, x)` with `back2(s₁, s₂) -> (dx₁, dx₂)` — because both
+     seeds depend on primals from *two different* pullbacks (`sᵅ` needs
+     `zᵅ⁺ + zᵅ⁻`, `src/rules.jl:411`); split mode supports this (seed after fwd,
+     before rev), but one helper shape doesn't serve all rules.
+   - `ZBoxRule` needs **no** batching: its three backs are each called once with
+     the same seed (`src/rules.jl:346-348`).
+3. **Preallocated shadows / first-call-cached thunks.** `LRP` precomputes modified
+   layers at construction. Caveats:
+   - Enzyme *accumulates* (`+=`) into `dx` — reused shadow buffers must be
+     re-zeroed with `make_zero!` between calls or relevances silently accumulate.
+   - Thunks are keyed on `typeof(x)` (eltype + ndims), unknown at `LRP`
+     construction — so thunk caching happens on first `analyze`, not in the
+     constructor.
+   - Measure with the existing PkgJogger suite.
+4. **Activity is trivial — via `FrozenLayer`, not `StatefulLuxLayer`.**
+   `StatefulLuxLayer` mutates itself on every call (`set_state!` caches the
+   returned `st`); annotating a self-mutating wrapper `Const` is only safe while
+   every written value is provably inactive, and mutation between the fwd and rev
+   thunk calls interacts with split-mode `ModifiedBetween` assumptions. LRP never
+   uses the returned state, so the immutable `FrozenLayer` above discards it —
+   zero mutation, same `Const` activity story. NNlib ships an EnzymeCore extension
+   with custom rules for `conv!`/`pool!`, so CNN hot paths don't rely on Enzyme
+   differentiating im2col.
 5. **Fallback** if split mode misbehaves on some layer: combined `Reverse` with a
    mutating wrapper (redundant forward, identical correctness), per-layer, behind
    the same helper interface.
+6. **Rule-code delta is mechanical:** the helper returns `dx` directly, so every
+   `c = only(back(s))` becomes `c = back(s)` — touches all rules, changes nothing
+   semantically.
 
 ### Simplification wins from Lux
 
-1. **`copy_layer` dies** (`src/layer_utils.jl:34-46`). Parameters live in `ps`, so
-   `modify_layer` collapses into `modify_parameters(rule, ps)` returning a modified
-   `ps` NamedTuple. No per-layer-type reconstruction (Dense/Conv/ConvTranspose/
-   CrossCor/Scale). The only remaining layer modification is swapping the
-   activation for `identity` once (the linearized layer) — uniform across Lux
-   layers, which all carry an `activation` field.
+1. **`copy_layer` shrinks to one generic function** (`src/layer_utils.jl:34-46`).
+   Parameters live in `ps`, so the per-rule part of `modify_layer` collapses into
+   `modify_parameters(rule, ps)` returning a modified `ps` NamedTuple. The
+   activation swap still requires reconstructing the immutable Lux layer struct,
+   but it becomes *one* generic call —
+   `ConstructionBase.setproperties(layer; activation=identity)` (Lux layers
+   uniformly name the field `activation`) — instead of five hand-written methods,
+   and it's rule-independent, so it runs once per layer rather than per
+   rule-variant. Layers without an `activation` field (pooling, dropout, reshape)
+   are never modified.
 2. **`ChainTuple`/`ParallelTuple`/`SkipConnectionTuple` die**
    (`src/chain_utils.jl`, 277 lines, plus `@forward`/MacroTools). Lux's `ps`/`st`
    NamedTuples already mirror the model tree; rules and pre-modified parameters are
@@ -89,8 +127,12 @@ Design points:
 5. **`Flux.activations` → ~10-line loop** over `model.layers` threading `st`.
 6. **`strip_softmax` gets trivial** — activation is layer config in Lux; `ps`
    untouched.
-7. **Dependency diet.** Drop: Flux, Zygote, MacroTools, MLUtils.
-   Final set: Lux, Enzyme, Functors, NNlib, XAIBase (+ stdlib).
+7. **Dependency diet.** Drop: Flux, Zygote, MacroTools, MLUtils (only used for
+   `MLUtils.flatten` in the `ReshapingLayer` union and one composite preset →
+   `Lux.FlattenLayer`).
+   Final set: Lux, Enzyme, Functors, NNlib, XAIBase, Reexport (stays — reexports
+   XAIBase, part of the public API), ConstructionBase (tiny, already in Lux's dep
+   tree, for the activation swap) + stdlib (Statistics, Markdown, Random).
    Zygote becomes a *test-only* dep (cross-check `layer_pullback` vs
    `Zygote.pullback` on sample layers).
 
@@ -107,17 +149,32 @@ Design points:
 - **Reference JLD2 values need regeneration** — Lux's `setup` draws parameters in a
   different order than Flux's `init`, even with StableRNG.
 - **Docs VGG example moves Metalhead → Boltz.jl** (`Vision.VGG`).
+- **Lux `LayerNorm` differs structurally from Flux's.** The non-canonized
+  `LayerNormRule` fallback (`src/rules.jl:558-573`) and `canonize_split` both
+  assume Flux's inner `.diag::Scale`; Lux folds affine params into
+  `ps.scale`/`ps.bias` and configures normalized dims differently. Needs a
+  Lux-native rewrite, structure verified in the Phase 1 spike.
+- **Enzyme × Julia version compat.** Enzyme historically lags new Julia minors —
+  pin compat bounds and decide the CI matrix explicitly.
+- **TTFX.** Per-layer thunks are Enzyme-friendly, but first `analyze` on a
+  VGG-scale composite compiles one thunk per (rule-variant × layer type). Budget
+  an explicit before/after latency measurement, not just runtime benchmarks.
 
 ## Phases
 
 ### Phase 1 — Spike (de-risk first)
-- [ ] Scratch script: `autodiff_thunk`/`ReverseSplitWithPrimal` + `BatchDuplicated`
-      through `StatefulLuxLayer`-wrapped `Dense`, `Conv`, `MaxPool`, testmode
-      `BatchNorm`, `LayerNorm` on CPU; compare against Zygote VJPs.
+- [ ] Scratch script: `autodiff_thunk`/`ReverseSplitWithPrimal` through
+      `FrozenLayer`-wrapped `Dense`, `Conv`, `MaxPool`, testmode `BatchNorm`,
+      `LayerNorm` on CPU; compare against Zygote VJPs. Include the nonlinear
+      surface (pooling, testmode BN, activation functions) — see AD core notes.
+- [ ] Two-seed variant: `ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))` +
+      width-2 `BatchDuplicated`; validate the `layer_pullback_2seeds` shape.
 - [ ] Check whether `set_runtime_activity` is needed anywhere (ideally not).
 - [ ] Verify Lux API details assumed in this plan: `Scale` parameter names;
       whether Lux 1.x `Chain` auto-flattens nested chains; `CrossCor` ↔
-      `Conv(cross_correlation=true)` type-level implications for `ConvLayer` union.
+      `Conv(cross_correlation=true)` type-level implications for `ConvLayer` union;
+      Lux `LayerNorm` internals (`ps.scale`/`ps.bias`, normalized-dims semantics)
+      for `LayerNormRule` and `canonize_split`.
 
 ### Phase 2 — Core skeleton
 - [ ] Swap deps in Project.toml (add Lux, Enzyme, Functors; drop Flux, Zygote,
@@ -126,15 +183,16 @@ Design points:
 - [ ] `layer_utils` on `ps` (activation field, `haskey(ps, :weight/:bias)`).
 - [ ] Activations collector (loop over `model.layers`, threading `st`).
 - [ ] New `LRP` struct: `model, ps, st_test, rules::NamedTuple, modified_ps::NamedTuple`.
-- [ ] `layer_pullback` Enzyme helper; generic `lrp!` using it.
+- [ ] `FrozenLayer` + `layer_pullback` Enzyme helper; generic `lrp!` using it
+      (incl. the mechanical `only(back(s))` → `back(s)` change in all rules).
 - [ ] `ZeroRule` + `EpsilonRule`; one end-to-end MLP test green.
 
 ### Phase 3 — All rules
 - [ ] Port `modify_*` family to operate on `ps` NamedTuples.
 - [ ] Simple rules: `GammaRule`, `WSquareRule`, `FlatRule`.
-- [ ] Multi-variant rules (named-tuple-of-variants convention kept): `ZBoxRule`,
-      `AlphaBetaRule`, `ZPlusRule`, `GeneralizedGammaRule` — use `BatchDuplicated`
-      for the two-seed pullbacks.
+- [ ] Multi-variant rules (named-tuple-of-variants convention kept): `ZBoxRule`
+      and `ZPlusRule` (single-seed pullbacks only); `AlphaBetaRule` and
+      `GeneralizedGammaRule` via `layer_pullback_2seeds`.
 - [ ] `LayerNormRule` against Lux `LayerNorm`; `PassRule`.
 - [ ] Keep fast paths (`src/rules.jl:583-597`): Zero/Epsilon on dropout/reshaping
       layers, FlatRule on Dense.
@@ -159,14 +217,43 @@ Design points:
       references.
 - [ ] Zygote-vs-Enzyme consistency testset for `layer_pullback` (Zygote test-only dep).
 - [ ] Keep Aqua, ExplicitImports, JuliaFormatter tests.
-- [ ] Port PkgJogger benchmarks; measure shadow/thunk preallocation.
+- [ ] Port PkgJogger benchmarks; measure shadow/thunk preallocation (remember
+      `make_zero!` on reused shadows; thunk cache is per input type, first-call).
+- [ ] TTFX measurement: first-`analyze` latency on a VGG-scale composite,
+      before/after comparison against v3.
 - [ ] Rewrite Literate docs with Lux; VGG composites example via Boltz.jl; README.
 - [ ] Remove stale Tullio/LoopVectorization doc content: `basics.jl` advertises a
       Tullio/LV package extension that no longer exists (stale since the
       ExplainableAI.jl split); rewrite the `@tullio` custom-rule example in
       `developer.md` with plain broadcasting/matmul. (The package itself has no
       Tullio/LV deps — nothing to drop from Project.toml.)
-- [ ] CHANGELOG, compat bounds (julia ≥ 1.10), tag v4.0.0.
+- [ ] CHANGELOG, compat bounds (julia ≥ 1.10; pin Enzyme, decide CI matrix —
+      Enzyme lags new Julia minors), tag v4.0.0.
+
+## Commit strategy
+
+Optimize the branch history for commit-by-commit review (merge without squash):
+
+1. **One commit per plan checkbox**, subject prefixed with the phase:
+   `phase 3: port GammaRule/WSquareRule/FlatRule to ps NamedTuples`. Reviewers can
+   diff a commit against its checkbox.
+2. **Isolate mechanical noise from semantic changes.** Pure-mechanical sweeps get
+   their own commits with no logic edits mixed in: the Project.toml dep swap, the
+   `only(back(s))` → `back(s)` sweep, JuliaFormatter runs.
+3. **Deletions stand alone.** Dropping `chain_utils.jl`, `modelindex.jl`,
+   `copy_layer` etc. are pure-removal commits — an all-red diff reviews in
+   seconds and keeps the replacement commit small.
+4. **Additive-first ordering.** New machinery (`FrozenLayer`, `layer_pullback` +
+   its Zygote cross-check tests) lands before the commits that wire it in.
+5. **Tests ride with the feature they cover**, so every commit is green with
+   respect to the suite *as it exists at that commit*. The old Flux suite dies in
+   the same commit as the Flux code paths it tests (Phase 2 skeleton swap); from
+   there the new suite grows per phase. Unavoidably-red intermediate commits are
+   confined to Phase 2 and marked `[red]` in the subject.
+6. **Generated artifacts in dedicated commits.** JLD2 reference regeneration is a
+   binary blob — commit the generating script first, the blobs second, never
+   mixed with logic changes.
+7. **Docs commits are code-free** (Literate rewrite, README, Tullio cleanup).
 
 ## Decisions
 
