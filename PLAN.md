@@ -1,7 +1,7 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** Phases 1–4 complete; Phase 5 (model
-utilities) next — see HANDOFF.md.
+**Branch:** `ah/enzyme` · **Status:** Phases 1–5 complete; Phase 6 (CRP)
+next — see HANDOFF.md.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
 simplifying the codebase along the way.
@@ -251,11 +251,14 @@ Design points:
       Show references regenerated; presets gained `NoOpLayer => PassRule()`.
 
 ### Phase 5 — Model utilities
-- [ ] Model checks / `LRP_CONFIG` on Lux types (`AbstractLuxLayer`, `WrappedFunction`).
-- [ ] `strip_softmax` (model-only, `ps` untouched).
-- [ ] Joint `(model, ps, st)` version of `flatten_model` (remap `ps` keys).
-- [ ] Joint `(model, ps, st)` version of `canonize`: LayerNorm split, BatchNorm
+- [x] Model checks / `LRP_CONFIG` on Lux types (`AbstractLuxLayer`, `WrappedFunction`).
+- [x] `strip_softmax` (model-only, `ps` untouched).
+      Bare output softmax becomes `NoOpLayer()` (length-preserving).
+- [x] Joint `(model, ps, st)` version of `flatten_model` (remap `ps` keys).
+- [x] Joint `(model, ps, st)` version of `canonize`: LayerNorm split, BatchNorm
       fusion into Dense/Conv.
+      Fusion includes `epsilon` (exact, unlike v3) and handles `affine=false`
+      BatchNorm and `use_bias=false` layers (flipped via `Lux.static(true)`).
 
 ### Phase 6 — CRP
 - [ ] Port `crp.jl` (near-mechanical once backward pass is ported).

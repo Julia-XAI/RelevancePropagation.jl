@@ -48,6 +48,29 @@ no-bias Flux layers; v4's rule compatibility defaults to requiring only a
 weight (`haskey(ps, :weight)`), which matches v3's *effective* behavior —
 no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 
+### Model utilities transform the Lux triple (phase 5)
+
+- `flatten_model` and `canonize` take and return `(model, ps, st)`:
+  splicing nested `Chain`s and fusing BatchNorm re-key `ps`/`st` to the
+  flattened `layer_1..layer_N` structure. `strip_softmax` stays model-only
+  (activation functions are layer configuration in Lux, `ps` untouched).
+- `strip_softmax` replaces a bare output softmax with `NoOpLayer()`,
+  *preserving chain length* (v3 swapped the Flux function for `identity`,
+  which also preserved length). The v3 implementation found the output
+  layer by `!=` comparison against `last_element` — unsafe in Lux, where
+  immutable layers compare structurally (`Dense(2 => 2) == Dense(2 => 2)`
+  is `true`, unlike mutable Flux layers) — so v4 descends positionally.
+- `canonize` fuses BatchNorm using the running statistics in `st` and
+  *includes `epsilon`* — the fusion is exact (v3 ignored `ϵ` and papered
+  over it with `safedivide`). `affine=false` BatchNorm fuses with
+  `γ=1, β=0`; `track_stats=false` (no `running_mean` in `st`) blocks
+  fusion. Fusing into a `use_bias=false` layer flips the static flag via
+  `setproperties(layer, (; use_bias=Lux.static(true)))` — a plain `Bool`
+  fails, the field is `Static.True`/`Static.False`.
+- Lux `Parallel` does **not** wrap bare functions in `WrappedFunction`
+  (`Chain` does); it also has no `getindex`, so tests address branches as
+  `p.layers.layer_i`.
+
 ## Framework differences (Flux → Lux)
 
 - **Parameter naming is uniform:** every parameterized layer LRP touches

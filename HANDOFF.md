@@ -1,125 +1,91 @@
 # Handoff — v4.0.0 Lux/Enzyme port
 
-**Branch:** `ah/enzyme` · **Plan:** PLAN.md (phases 1–4 complete, ticked) ·
+**Branch:** `ah/enzyme` · **Plan:** PLAN.md (phases 1–5 complete, ticked) ·
 **Porting notes:** NOTES.md
 
 ## Current state
 
-- Phases 1–4 are committed through `23a31ec` (`phase 4: regenerate show
-  references for Lux output`). The working tree is clean apart from this file
-  and PLAN.md checkbox updates.
-- Last full suite run (at the show.jl commit `41f72b5`): **430 pass, 21 broken,
-  0 failures**, `LRP composites | 9`. The broken tests are deliberate
-  `@test_broken`/`@test_skip` markers for unported features.
-- `runtests.jl` still carries 7 "Not yet ported" markers: checks + canonize
-  (phase 5), crp (phase 6), cnn / batches / benchmarks / linting (phase 7).
+- Phases 1–5 are committed through `3c799dc` (`phase 5: JuliaFormatter sweep
+  over phase 5 test files`). The working tree is clean apart from this file,
+  PLAN.md checkbox updates and a NOTES.md phase-5 section.
+- Last full suite run (at the canonize commit `2ce8867`, before the
+  formatting-only sweep): **497 pass, 5 broken, 0 failures** in ~3 min.
+  The 5 broken tests are the "Not yet ported" markers in runtests.jl:
+  crp (phase 6), cnn / batches / benchmarks / linting (phase 7).
+- All phase-5 utilities are exported: `strip_softmax` (model-only),
+  `flatten_model(model, ps, st)` and `canonize(model, ps, st)` (joint
+  triples, re-keyed to `layer_1..layer_N`). The LayerNorm canonize guard in
+  test_rules.jl activated automatically (`ported(:canonize)`).
 
-## Next: Phase 5 (one commit per checkbox, in this order)
+## Next: Phase 6 (CRP)
 
-### 1. Model checks / `LRP_CONFIG` tests
+Port `src/crp.jl` (v3 file: `git show 2550998~1:src/crp.jl`; the on-disk
+copy is identical). The port is near-mechanical:
 
-`src/checks.jl` is already ported (phase 2): `LRP_CONFIG` module,
-`check_lrp_compat`, `print_lrp_model_check`, `lrp_check_layer_type` with
-`WrappedFunction` unwrapping. The remaining work is the **tests**:
+- `CRP(lrp, layer::Int, features)` wraps an already-constructed `LRP`
+  analyzer — no new Lux plumbing. `length(lrp.model)` works on Lux `Chain`s.
+- v3 indexes `rules[k]`, `layers[k]`, `modified_layers[k]` **positionally**
+  in the backward loops. In v4 these are NamedTuples on the `LRP` struct —
+  unpack once via `values(lrp.rules)`, `values(lrp.layers)`,
+  `values(lrp.modified_layers)` (see `lrp_backward_pass!` in `src/lrp.jl`),
+  then the `k`-loops port unchanged.
+- `get_activations(model, input)` → v4's
+  `get_activations(lrp.layers, input)` (NamedTuple of `FrozenLayer`s;
+  same `(input, a¹, …, aᴺ)` tuple contract).
+- `AbstractFeatureSelector`/`TopNFeatures`/`IndexedFeatures` come from
+  XAIBase and are framework-agnostic; the feature masking code
+  (`R_feature[idx] .= …`) touches plain arrays only.
+- CRP assumes a **flat** model (positional `layer::Int`); document that
+  users should `flatten_model` first (v3 had the same implicit assumption).
+- Port `test/test_crp.jl` (v3 on disk): Flux MLP/CNN → Lux triple via
+  `Lux.setup(StableRNG(123), model)`; include in runtests.jl and remove the
+  phase-6 marker. No JLD2 references involved.
 
-- Port `test/test_checks.jl` (v3 version: `git show 2550998~1:test/test_checks.jl`):
-  `check_lrp_compat` throws/passes, `print_lrp_model_check` reference test,
-  `LRP_CONFIG.supports_layer`/`supports_activation` registration with a custom
-  `MyLayer` struct and an `unknown_function`.
-- Delete the stale v3 `test/references/show/check_lrp_compat.txt` before the
-  run so ReferenceTests regenerates it (missing references are created and
-  pass; mismatches fail non-interactively). Commit the regenerated file in a
-  dedicated artifacts commit.
-- v3 used Suppressor to swallow check output — either add it to
-  test/Project.toml or replace with `redirect_stdout`.
-- Include the file in runtests.jl and remove its "Not yet ported" marker.
+## Cross-task insights (phases 6–7)
 
-**Open Lux API questions** are collected in a runnable probe script:
-`<scratchpad>/probe_phase5.jl` (session scratchpad under
-`/private/tmp/claude-501/-Users-hill-Developer-Julia-XAI-RelevancePropagation-jl/`;
-may vanish on reboot). It probes: whether `Chain(MyLayer(...))` accepts a
-non-`AbstractLuxLayer` struct and what `Lux.setup` does with it;
-`Chain(::NamedTuple)` construction (needed to preserve keys in
-`flatten_model`); `Chain` `getindex`/`length`; `BatchNorm` fields and
-`epsilon`; flipping static `use_bias` via
-`setproperties(d, (; use_bias=true))` vs `Lux.static(true)`; `Conv` fields for
-fusion reconstruction; `WrappedFunction`/`NoOpLayer`/`Dense` equality (`==`)
-for strip_softmax tests; the `LayerNorm(shape, identity; affine=false)` split
-constructor. **Not yet run** — the scratch env first needs
-`Pkg.add("ConstructionBase")`.
-
-### 2. `strip_softmax` (model-only, in checks.jl)
-
-v3 semantics, verified from `git show 2550998~1:src/chain_utils.jl` and
-`...:test/test_utils.jl`:
-
-- A bare output softmax (`WrappedFunction(softmax)` in Lux) is **replaced by an
-  identity layer** (`NoOpLayer()`), preserving chain length — it is *not*
-  removed from the chain.
-- `Dense(n => m, softmax)` at the output gets its activation set to `identity`
-  (via `remove_activation` in `src/layer_utils.jl`).
-- Only the *last* element is touched, descending nested `Chain`s; a
-  `Parallel`/`SkipConnection` at the output is left alone.
-- `ps` is untouched (activation is layer config in Lux), so the signature is
-  `strip_softmax(model)` — no joint tuple needed.
-- Export it; un-skip the `@test_skip` strip_softmax block in
-  `test/test_utils.jl`. **Warning:** the currently-skipped line
-  `strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2))` is
-  **wrong** (contradicts v3 length-preserving semantics) — fix it to expect
-  `Chain(Dense(2 => 2), NoOpLayer())` when un-skipping.
-
-### 3. Joint `flatten_model(model, ps, st)`
-
-- Returns `(flat_model, flat_ps, flat_st)`, re-keying everything to
-  `layer_1, layer_2, …` (Lux `Chain` does not auto-flatten nested chains).
-- Chains-of-chains are spliced; `Parallel`/`SkipConnection` keep their
-  container but their branches flatten internally.
-- Un-skip the flatten_model `@test_skip` block in `test/test_utils.jl`,
-  adapting to the tuple API (build `ps`/`st` via `Lux.setup(StableRNG(...))`).
-- Export it.
-
-### 4. Joint `canonize(model, ps, st)`
-
-Rewrite `src/canonize.jl` (v3 file still on disk for reference), include in
-the module, export. v3 structure: `canonize_fuse(flatten_model(canonize_split(model)))`.
-
-- **Split LayerNorm** when it is affine OR has activation ≠ identity:
-  `LayerNorm(shape, identity; dims, epsilon, affine=false)` followed by
-  `Scale(shape, activation)`. Lux LayerNorm `ps` is `(scale, bias)` sized
-  `(shape..., 1)` — reshape to `shape` for the Scale layer's `ps`. Decide
-  affine-ness via `haskey(ps, :scale)` (canonize has `ps`, unlike v3).
-- **Fuse BatchNorm** into a preceding `Dense`/`Conv` whose activation is
-  `identity`. Include epsilon (deliberate improvement over v3, which ignored
-  it): `scale = γ ./ sqrt.(σ² .+ ϵ)`. Then `W′ = scale .* W` (row-wise for
-  Dense; reshape scale to broadcast over the output-channel dim for Conv),
-  `b′ = scale .* (b .- μ) .+ β`, or `b′ = β .- scale .* μ` for no-bias layers
-  (requires flipping `use_bias` — see probe). The fused layer takes the
-  BatchNorm's activation. Fuse repeatedly without incrementing the index
-  (v3 behavior) so `Dense → BN → BN` collapses fully.
-- Running stats live in `st` (`running_mean`, `running_var`); collect test
-  stats via `_, st = Lux.apply(model, x, ps, st)` in train mode, then
-  `testmode`.
-- Port `test/test_canonize.jl` (v3: `@inferred` canonize_fuse for Dense/Conv +
-  output ≈ checks, sequential model 15→9 layers, nested 4, Parallel/
-  SkipConnection structure counts).
-- Un-skip the LayerNorm canonize sub-guard in `test/test_rules.jl` (it is
-  guarded on `isdefined(RelevancePropagation, :canonize)` and activates
-  automatically once canonize is exported).
+- **Lux `Parallel` does not wrap bare functions** (`Parallel(+, softmax, …)`
+  is a `MethodError`) — wrap explicitly in `WrappedFunction`. `Chain` wraps
+  automatically. `Parallel` also has **no `getindex`**: address branches as
+  `p.layers.layer_i`.
+- **Lux layers compare `==` structurally** (immutable): `Dense(2 => 2) ==
+  Dense(2 => 2)` is `true`, unlike mutable Flux layers where `==` was
+  identity. Never port v3 code that finds a layer by `==` against a model
+  element (that's why v4 `strip_softmax` descends positionally).
+- **Container rebuilds:** `setproperties(c, (; layers=nt))` works on
+  `Chain`/`Parallel`/`SkipConnection` and preserves `connection`/`name`;
+  `Chain(::NamedTuple)` preserves keys and `==`-matches varargs
+  construction with default keys.
+- **Static fields:** `use_bias`/`affine` are `Static.True`/`Static.False`
+  type parameters. Flipping requires `Lux.static(true)` (imported as
+  `using Lux: static`); a plain `Bool` in `setproperties` throws.
+- **LuxLib warns** when a model is applied in train mode outside AD (used
+  for collecting BatchNorm stats in canonize tests) — harmless, prints once.
+- **Scratch env** at `<session-scratchpad>/env` (previous sessions used
+  `/private/tmp/claude-501/-Users-hill-…/1a40a751-…/scratchpad/env`) has the
+  package dev'ed plus Lux, Functors, StableRNGs, ConstructionBase,
+  ReferenceTests, JLD2, LinearAlgebra, Random — enough to `include` most
+  test files directly for ~30 s smoke runs (run from `test/` so reference
+  paths resolve).
+- **Background `Pkg.test()` needs the repo as the active project** — run
+  `julia -e 'using Pkg; Pkg.activate("<repo>"); Pkg.test()'`; a bare
+  `Pkg.test()` inherits whatever cwd the shell last used.
+- Phase 7 note: `test/Manifest.toml` is a stale v3 leftover (Flux pins,
+  Oct 2024) that `Pkg.test` ignores — delete it in the test-infrastructure
+  commit to avoid confusion.
 
 ## Testing infrastructure
 
-- Full suite: `julia --startup-file=no -e 'using Pkg; Pkg.test()'` from the
-  repo root (~3–8 min). `--startup-file=no` is **required**.
-- Fast smoke tests: scratch env at `<scratchpad>/env` with the package
-  `Pkg.develop`ed plus Lux/Functors/StableRNGs (~30 s per script). Recreate if
-  gone: `Pkg.activate(env); Pkg.develop(path=repo); Pkg.add.(["Lux",
-  "Functors", "StableRNGs", "ConstructionBase"])`.
-- **Never edit `test/` while a suite is running** — test files are `include`d
-  at runtime mid-run. `src/` edits are safe ~30 s in (package precompiles at
-  start). Confirm which state ran via the testset pass-counts.
+- Full suite: `julia --startup-file=no -e 'using Pkg;
+  Pkg.activate("<repo>"); Pkg.test()'` (~3 min). `--startup-file=no` is
+  **required**.
+- **Never edit `test/` while a suite is running** — test files are
+  `include`d at runtime mid-run. `src/` edits are safe once the test
+  process has loaded the package (first `@info "Testing …"` in the log).
 - ReferenceTests: missing reference files are created (test passes with
   `@info`); mismatches fail non-interactively. To regenerate: delete, run,
   inspect the new file, commit separately.
+- JuliaFormatter (blue style, repo `.JuliaFormatter.toml`): format new
+  files before committing; formatting-only changes go in dedicated commits.
 
 ## Standing directives (from the user; do not violate)
 
@@ -127,17 +93,20 @@ the module, export. v3 structure: `canonize_fuse(flatten_model(canonize_split(mo
   `@test_broken`/`@test_skip`, guarded on
   `isdefined(RelevancePropagation, :Sym)` where possible so they
   auto-activate when the feature lands.
-- **Functions with randomness take an explicit `rng` argument** — never mutate
-  the global (or Lux global) RNG.
+- **Functions with randomness take an explicit `rng` argument** — never
+  mutate the global (or Lux global) RNG.
 - **Raw Enzyme, no DifferentiationInterface.**
-- **Width-2 Enzyme thunks crash on pooling/normalization layers** — only ever
-  request `layer_pullback_2seeds` for weight-bias layers (Dense, Scale, Conv,
-  ConvTranspose).
+- **Width-2 Enzyme thunks crash on pooling/normalization layers** — only
+  ever request `layer_pullback_2seeds` for weight-bias layers (Dense,
+  Scale, Conv, ConvTranspose).
 - Commit strategy (PLAN.md §Commit strategy): one commit per checkbox,
   phase-prefixed subject, every commit green, deletions and generated
   artifacts stand alone, trailer
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
 
-## After Phase 5
+## After Phase 6
 
-Phase 6 (CRP) and Phase 7 (tests/docs/release) per PLAN.md — not yet started.
+Phase 7 (tests, docs, release) per PLAN.md — not yet started. Includes CNN
+reference regeneration (JLD2), Zygote-vs-Enzyme consistency testset,
+benchmarks/TTFX, Literate docs with Boltz.jl VGG, CHANGELOG and compat
+bounds for the v4.0.0 tag.
