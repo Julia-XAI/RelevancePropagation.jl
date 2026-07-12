@@ -271,3 +271,104 @@ struct FlatRule <: AbstractLRPRule end
 modify_input(::FlatRule, input) = ones_like(input)
 modify_weight(::FlatRule, w) = ones_like(w)
 modify_bias(::FlatRule, b) = zero(b)
+
+#===================#
+# Complex LRP Rules #
+#===================#
+
+# The following rules use custom `lrp!` implementations
+# and optionally custom `modify_layer` functions which return multiple modified layers.
+# The convention used here is to return multiple modified layers as named tuples.
+
+"""
+    ZBoxRule(low, high)
+
+LRP-``zᴮ``-rule. Commonly used on the first layer for pixel input.
+
+The parameters `low` and `high` should be set to the lower and upper bounds
+of the input features, e.g. `0.0` and `1.0` for raw image data.
+It is also possible to provide two arrays of that match the input size.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k=\\sum_i \\frac{W_{ij}a_j^k - W_{ij}^{+}l_j - W_{ij}^{-}h_j}
+    {\\sum_l W_{il}a_l^k+b_i - \\left(W_{il}^{+}l_l+b_i^{+}\\right) - \\left(W_{il}^{-}h_l+b_i^{-}\\right)} R_i^{k+1}
+```
+
+# References
+- $REF_MONTAVON_OVERVIEW
+"""
+struct ZBoxRule{T} <: AbstractLRPRule
+    low::T
+    high::T
+end
+function modify_layer(::ZBoxRule, layer::FrozenLayer)
+    return (
+        layer⁺ = modify_layer(Val(:keep_positive), layer),
+        layer⁻ = modify_layer(Val(:keep_negative), layer),
+    )
+end
+
+# The ZBoxRule requires its own implementation of relevance propagation.
+function lrp!(Rᵏ, rule::ZBoxRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+    l = zbox_input(aᵏ, rule.low)
+    h = zbox_input(aᵏ, rule.high)
+
+    # Each `back` is called exactly once, so three single-seed pullbacks suffice.
+    z, back = layer_pullback(layer, aᵏ)
+    z⁺, back⁺ = layer_pullback(modified_layers.layer⁺, l)
+    z⁻, back⁻ = layer_pullback(modified_layers.layer⁻, h)
+
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, z - z⁺ - z⁻)
+    c = back(s)
+    c⁺ = back⁺(s)
+    c⁻ = back⁻(s)
+    @. Rᵏ = aᵏ * c - l * c⁺ - h * c⁻
+end
+
+zbox_input(in::AbstractArray{T}, c::Real) where {T} = fill(convert(T, c), size(in))
+function zbox_input(in::AbstractArray{T}, A::AbstractArray) where {T}
+    @assert size(A) == size(in)
+    return convert.(T, A)
+end
+
+"""
+    ZPlusRule()
+
+LRP-``z⁺`` rule. Commonly used on lower layers.
+
+Equivalent to `AlphaBetaRule(1.0f0, 0.0f0)`, but slightly faster.
+See also [`AlphaBetaRule`](@ref).
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\frac{\\left(W_{ij}a_j^k\\right)^+}{\\sum_l\\left(W_{il}a_l^k+b_i\\right)^+} R_i^{k+1}
+```
+
+# References
+- $REF_BACH_LRP
+- $REF_MONTAVON_DTD
+"""
+struct ZPlusRule <: AbstractLRPRule end
+function modify_layer(::ZPlusRule, layer::FrozenLayer)
+    return (
+        layer⁺ = modify_layer(Val(:keep_positive), layer),
+        layer⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
+    )
+end
+
+function lrp!(Rᵏ, rule::ZPlusRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+    aᵏ⁺ = keep_positive(aᵏ)
+    aᵏ⁻ = keep_negative(aᵏ)
+
+    # Each `back` is called exactly once, so two single-seed pullbacks suffice.
+    z⁺, back⁺ = layer_pullback(modified_layers.layer⁺, aᵏ⁺)
+    z⁻, back⁻ = layer_pullback(modified_layers.layer⁻, aᵏ⁻)
+
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, z⁺ + z⁻)
+    c⁺ = back⁺(s)
+    c⁻ = back⁻(s)
+    @. Rᵏ = aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
+end
