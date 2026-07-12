@@ -187,3 +187,88 @@ function lrp_backward_pass!(Rs, as, rules, layers::NamedTuple, modified_layers)
     end
     return Rs
 end
+
+#==========================================#
+# Special calls to Lux's "dataflow layers" #
+#==========================================#
+
+# Rules for `Chain` and `Parallel` layers are nested NamedTuples
+# mirroring the model structure (like `ps` and `st`).
+
+function lrp!(
+    Rᵏ, rules::NamedTuple, chain::FrozenLayer{<:Chain}, modified_chain::NamedTuple, aᵏ, Rᵏ⁺¹
+)
+    layers = frozen_children(chain)
+    as = get_activations(layers, aᵏ)
+    Rs = similar.(as)
+    last(Rs) .= Rᵏ⁺¹
+
+    lrp_backward_pass!(Rs, as, rules, layers, modified_chain)
+    return Rᵏ .= first(Rs)
+end
+
+function lrp!(
+    Rᵏ,
+    rules::NamedTuple,
+    parallel::FrozenLayer{<:Parallel},
+    modified_parallel::NamedTuple,
+    aᵏ,
+    Rᵏ⁺¹,
+)
+    children = frozen_children(parallel)
+
+    # Re-compute contributions of parallel branches to output activation
+    aᵏ⁺¹s = map(child -> child(aᵏ), values(children))
+
+    # Distribute the relevance Rᵏ⁺¹ to the i-th branch of the parallel layer
+    # according to the contribution aᵏ⁺¹ᵢ of branch i to the output activation aᵏ⁺¹:
+    #   Rᵏ⁺¹s[i] = Rᵏ⁺¹ .* aᵏ⁺¹s[i] ./ aᵏ⁺¹ = c .* aᵏ⁺¹s[i]
+    c = Rᵏ⁺¹ ./ stabilize_denom(sum(aᵏ⁺¹s))
+    Rᵏ⁺¹s = map(aᵏ⁺¹ -> c .* aᵏ⁺¹, aᵏ⁺¹s)
+
+    # Compute individual input relevances Rᵏ for all branches of the parallel layer
+    Rᵏs = map(_ -> similar(aᵏ), aᵏ⁺¹s)
+    for (Rᵏᵢ, rule, child, modified_child, Rᵏ⁺¹ᵢ) in
+        zip(Rᵏs, values(rules), values(children), values(modified_parallel), Rᵏ⁺¹s)
+        # In-place update Rᵏᵢ and therefore Rᵏs
+        lrp!(Rᵏᵢ, rule, child, modified_child, aᵏ, Rᵏ⁺¹ᵢ)
+    end
+    # Sum up individual input relevances
+    return Rᵏ .= sum(Rᵏs)
+end
+
+function lrp_skip_connection!(Rᵏ, rules, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹)
+    inner = frozen_inner(sc)
+
+    # Compute contributions of the wrapped layer and the skip connection to the
+    # output activation. For the skip connection, activations stay constant:
+    # aᵏ⁺¹_skip = aᵏ_skip = aᵏ
+    aᵏ⁺¹_inner = inner(aᵏ)
+    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_inner + aᵏ) # using aᵏ = aᵏ⁺¹_skip
+
+    # Distribute relevance according to contribution to output activation.
+    # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
+    Rᵏ⁺¹_inner = c .* aᵏ⁺¹_inner
+    Rᵏ_skip = c .* aᵏ # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip
+
+    # Compute input relevance Rᵏ of the wrapped layer
+    Rᵏ_inner = similar(Rᵏ_skip)
+    lrp!(Rᵏ_inner, rules, inner, modified, aᵏ, Rᵏ⁺¹_inner)
+
+    # Sum up input relevances
+    return Rᵏ .= Rᵏ_inner .+ Rᵏ_skip
+end
+
+# `SkipConnection` is transparent in `rules` and `modified_layers` (like in
+# `ps`/`st`), so `lrp!` can be reached with a single rule paired with a
+# `FrozenLayer{<:SkipConnection}`. Route each rule type with its own generic
+# `lrp!(Rᵏ, rule, layer::FrozenLayer, ...)` method explicitly to the skip
+# connection handler to avoid method ambiguities.
+for R in
+    (:NamedTuple, :AbstractLRPRule, :PassRule, :ZBoxRule, :ZPlusRule, :AlphaBetaRule, :GeneralizedGammaRule)
+    @eval function lrp!(
+        Rᵏ, rules::$R, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
+    )
+        return lrp_skip_connection!(Rᵏ, rules, sc, modified, aᵏ, Rᵏ⁺¹)
+    end
+end

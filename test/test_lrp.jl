@@ -84,6 +84,79 @@ end
     @test expl_single.val ≈ expl_batch.val[:, 1]
 end
 
+@testset "Nested dataflow layers" begin
+    # Analytic Parallel and SkipConnection test with explicit rule NamedTuples;
+    # the same values are tested via a Composite in test_rules.jl.
+    W = [3.0 4.0; 5.0 6.0]
+    b = [7.0, 8.0]
+    aᵏ = reshape([1.0 2.0], 2, 1)
+    dense = Dense(2 => 2, relu)
+    ps_dense = (; weight=W, bias=b)
+
+    model_p = Chain(Parallel(+, NoOpLayer(), dense))
+    ps_p = (; layer_1=(; layer_1=NamedTuple(), layer_2=ps_dense))
+    st_p = (; layer_1=(; layer_1=NamedTuple(), layer_2=NamedTuple()))
+    rules_p = (; layer_1=(; layer_1=PassRule(), layer_2=ZeroRule()))
+    analyzer_p = LRP(model_p, ps_p, st_p, rules_p)
+
+    model_s = Chain(SkipConnection(dense, +))
+    ps_s = (; layer_1=ps_dense)
+    st_s = (; layer_1=NamedTuple())
+    rules_s = (; layer_1=ZeroRule()) # rule on a SkipConnection targets the wrapped layer
+    analyzer_s = LRP(model_s, ps_s, st_s, rules_s)
+
+    # See test_rules.jl for the derivation of the expected values.
+    e1_p = analyze(aᵏ, analyzer_p, 1)
+    e1_s = analyze(aᵏ, analyzer_s, 1)
+    @test e1_p.val ≈ reshape([4 / 19 8 / 19], 2, 1)
+    @test e1_s.val ≈ reshape([4 / 19 8 / 19], 2, 1)
+
+    e2_p = analyze(aᵏ, analyzer_p, 2)
+    e2_s = analyze(aᵏ, analyzer_s, 2)
+    @test e2_p.val ≈ reshape([5 / 27 14 / 27], 2, 1)
+    @test e2_s.val ≈ reshape([5 / 27 14 / 27], 2, 1)
+
+    # A nested Chain yields the same relevances as its flat equivalent
+    model_flat = Chain(Dense(10 => 8, relu), Dense(8 => 8, relu), Dense(8 => 4, relu), Dense(4 => 3))
+    ps_flat, st_flat = Lux.setup(StableRNG(456), model_flat)
+    model_nested = Chain(
+        Dense(10 => 8, relu), Chain(Dense(8 => 8, relu), Dense(8 => 4, relu)), Dense(4 => 3)
+    )
+    ps_nested = (;
+        layer_1=ps_flat.layer_1,
+        layer_2=(; layer_1=ps_flat.layer_2, layer_2=ps_flat.layer_3),
+        layer_3=ps_flat.layer_4,
+    )
+    st_nested = (;
+        layer_1=st_flat.layer_1,
+        layer_2=(; layer_1=st_flat.layer_2, layer_2=st_flat.layer_3),
+        layer_3=st_flat.layer_4,
+    )
+    rules_nested = (;
+        layer_1=ZeroRule(),
+        layer_2=(; layer_1=EpsilonRule(), layer_2=ZeroRule()),
+        layer_3=EpsilonRule(),
+    )
+    analyzer_flat = LRP(
+        model_flat, ps_flat, st_flat, [ZeroRule(), EpsilonRule(), ZeroRule(), EpsilonRule()]
+    )
+    analyzer_nested = LRP(model_nested, ps_nested, st_nested, rules_nested)
+    e_flat = analyze(batch, analyzer_flat)
+    e_nested = analyze(batch, analyzer_nested)
+    @test e_nested.val ≈ e_flat.val
+
+    # SkipConnection wrapping a Chain takes a nested rules NamedTuple
+    model_sc = Chain(
+        Dense(10 => 10, relu), SkipConnection(Chain(Dense(10 => 8, relu), Dense(8 => 10)), +)
+    )
+    ps_sc, st_sc = Lux.setup(StableRNG(789), model_sc)
+    rules_sc = (; layer_1=ZeroRule(), layer_2=(; layer_1=ZeroRule(), layer_2=EpsilonRule()))
+    analyzer_sc = LRP(model_sc, ps_sc, st_sc, rules_sc)
+    e_sc = analyze(batch, analyzer_sc)
+    @test size(e_sc.val) == size(batch)
+    @test !any(isnan, e_sc.val)
+end
+
 @testset "Output relevance normalization" begin
     analyzer1 = LRP(model, ps, st)
     analyzer2 = LRP(model, ps, st; normalize_output_relevance=false)
