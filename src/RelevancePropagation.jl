@@ -18,6 +18,7 @@ using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
 using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
 
 using ConstructionBase: setproperties
+using Lux: static
 using Functors: KeyPath
 using NNlib: relu, gelu, swish, mish, softmax, softmax!
 using Markdown: @md_str
@@ -36,8 +37,8 @@ include("composite.jl")
 include("lrp.jl")
 include("show.jl")
 include("composite_presets.jl") # uses show.jl
+include("canonize.jl")
 # Not yet ported to Lux/Enzyme (v4.0.0 rewrite, see PLAN.md):
-# include("canonize.jl")          # phase 5
 # include("crp.jl")               # phase 6
 
 export LRP
@@ -61,7 +62,7 @@ export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
 export EpsilonAlpha2Beta1Flat
 
 # Model utilities
-export strip_softmax, flatten_model
+export strip_softmax, flatten_model, canonize
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer

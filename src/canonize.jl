@@ -3,104 +3,147 @@
 #================================#
 
 """
-    canonize(model)
+    canonize(model, ps, st)
 
-Canonize model by flattening it and fusing BatchNorm layers into preceding Dense and Conv
-layers with linear activation functions.
+Canonize a model by flattening it and fusing BatchNorm layers into preceding
+Dense and Conv layers with linear activation functions.
+Returns a `(model, ps, st)` triple, since fusing parameters and flattening
+re-key `ps` and `st`.
+
+BatchNorm layers are fused using the running statistics in `st`
+(collected by applying the model in train mode).
+LayerNorm layers containing an affine transformation or an activation
+function are split into a normalization-only LayerNorm followed by a
+`Scale` layer carrying both.
 """
-function canonize(model::Chain)
-    model = canonize_split(model)
-    model = canonize_fuse(flatten_model(model))
-    return model
+function canonize(model::Chain, ps, st)
+    return canonize_fuse(flatten_model(canonize_split(model, ps, st)...)...)
 end
 
 #==============#
 # Split layers #
 #==============#
 
-canonize_split(model::Chain) = Chain(canonize_split(model.layers)...)
-canonize_split(p::Parallel) = Parallel(p.connection, canonize_split.(p.layers))
-canonize_split(s::SkipConnection) = SkipConnection(canonize_split(s.layers), s.connection)
-canonize_split(layer) = layer
-canonize_split(layers::Tuple) = canonize_split.(layers)
-canonize_split(layers::AbstractArray) = canonize_split.(layers)
+function canonize_split(model::Union{Chain,Parallel}, ps, st)
+    ks = keys(model.layers)
+    triples = map(k -> canonize_split(model.layers[k], ps[k], st[k]), ks)
+    layers = NamedTuple{ks}(map(first, triples))
+    split_ps = NamedTuple{ks}(map(t -> t[2], triples))
+    split_st = NamedTuple{ks}(map(t -> t[3], triples))
+    return setproperties(model, (; layers)), split_ps, split_st
+end
+function canonize_split(s::SkipConnection, ps, st)
+    # `SkipConnection` is an `AbstractLuxWrapperLayer`:
+    # its `ps`/`st` pass through to the wrapped layer directly.
+    inner, split_ps, split_st = canonize_split(s.layers, ps, st)
+    return setproperties(s, (; layers=inner)), split_ps, split_st
+end
+canonize_split(layer, ps, st) = layer, ps, st
 
-# Don't split LayerNorm if the affine part is already the identity
-canonize_split(l::LayerNorm{F,D}) where {F,D<:typeof(identity)} = l
+function canonize_split(l::LayerNorm, ps, st)
+    affine = haskey(ps, :scale)
+    # Don't split LayerNorm if the affine part is already the identity
+    !affine && l.activation === identity && return l, ps, st
 
-canonize_split(l::LayerNorm) = Chain(split_layernorm(l)...)
-function split_layernorm(l::LayerNorm)
-    layer_norm = LayerNorm(identity, identity, l.ϵ, l.size, false)
-    if l.diag isa Scale
-        diag = l.diag
-    else # LayerNorm does not contain an affine transformation, but an activation
-        diag = Scale(1, l.λ; bias=false)
-        diag.scale .= 1.0
+    norm = LayerNorm(l.shape, identity; dims=l.dims, epsilon=l.epsilon, affine=false)
+    if affine
+        # Lux sizes LayerNorm's affine parameters `(shape..., 1)`
+        scale = Scale(l.shape, l.activation)
+        scale_ps = (; weight=reshape(ps.scale, l.shape), bias=reshape(ps.bias, l.shape))
+    else # LayerNorm contains no affine transformation, only an activation
+        scale = Scale(l.shape, l.activation; use_bias=false)
+        scale_ps = (; weight=ones(Float32, l.shape))
     end
-    return (layer_norm, diag)
+    split = Chain(norm, scale)
+    # The nested `Chain` is spliced into its parent by `flatten_model`
+    return split,
+    (; layer_1=NamedTuple(), layer_2=scale_ps),
+    (; layer_1=st, layer_2=NamedTuple())
 end
 
 #=============#
 # Fuse layers #
 #=============#
 
-function canonize_fuse(model::Chain)
-    model = Chain(canonize_fuse.(model.layers)) # recursively canonize Parallel layers
+function canonize_fuse(model::Chain, ps, st)
+    # Recursively canonize Parallel and SkipConnection layers first
+    layers, pss, sts = [], [], []
+    for k in keys(model.layers)
+        layer, p, s = canonize_fuse(model.layers[k], ps[k], st[k])
+        push!(layers, layer)
+        push!(pss, p)
+        push!(sts, s)
+    end
 
     i = 1
-    while i < length(model)
-        l1, l2 = model[i:(i + 1)]
-
-        if is_fuseable(l1, l2)
-            fused = canonize_fuse(l1, l2)
-            model = Chain(model[1:(i - 1)]..., fused, model[(i + 2):end]...)
+    while i < length(layers)
+        if is_fuseable(layers[i], layers[i + 1], sts[i + 1])
+            layers[i], pss[i] = canonize_fuse(
+                layers[i], pss[i], layers[i + 1], pss[i + 1], sts[i + 1]
+            )
+            deleteat!(layers, i + 1)
+            deleteat!(pss, i + 1)
+            deleteat!(sts, i + 1)
             # if fused, don't increment i,
             # instead try fusing the new layer with the next one
         else
             i += 1
         end
     end
-    return model
+    fused_model = Chain(layers...)
+    ks = keys(fused_model.layers)
+    return fused_model, NamedTuple{ks}(Tuple(pss)), NamedTuple{ks}(Tuple(sts))
 end
 
-function canonize_fuse(p::Parallel)
-    return Parallel(p.connection, canonize_fuse.(p.layers))
+function canonize_fuse(p::Parallel, ps, st)
+    ks = keys(p.layers)
+    triples = map(k -> canonize_fuse(p.layers[k], ps[k], st[k]), ks)
+    layers = NamedTuple{ks}(map(first, triples))
+    fused_ps = NamedTuple{ks}(map(t -> t[2], triples))
+    fused_st = NamedTuple{ks}(map(t -> t[3], triples))
+    return setproperties(p, (; layers)), fused_ps, fused_st
 end
-
-function canonize_fuse(s::SkipConnection)
-    return SkipConnection(canonize_fuse(s.layers), s.connection)
+function canonize_fuse(s::SkipConnection, ps, st)
+    inner, fused_ps, fused_st = canonize_fuse(s.layers, ps, st)
+    return setproperties(s, (; layers=inner)), fused_ps, fused_st
 end
+canonize_fuse(layer, ps, st) = layer, ps, st
 
-canonize_fuse(layer) = layer
+# If two layers satisfy `is_fuseable`, the five-argument `canonize_fuse` is called.
+function is_fuseable(l::Union{Dense,Conv}, bn::BatchNorm, st_bn)
+    return activation_fn(l) === identity && haskey(st_bn, :running_mean)
+end
+is_fuseable(l1, l2, st2) = false
 
-# If two layers satisfy `is_fuseable`, the two-argument `canonize_fuse(l1, l2)` is called.
+"""
+    canonize_fuse(layer, ps_layer, bn, ps_bn, st_bn)
 
-is_fuseable(l::Union{Dense,Conv}, bn::BatchNorm) = activation_fn(l) == identity
-is_fuseable(l1, l2) = false
+Fuse a BatchNorm layer into a preceding Dense or Conv layer
+with identity activation function.
+Returns the fused `(layer, ps)` pair;
+the fused layer takes the BatchNorm's activation function.
+"""
+function canonize_fuse(layer::Union{Dense,Conv}, ps_layer, bn::BatchNorm, ps_bn, st_bn)
+    activation_fn(layer) !== identity &&
+        throw(ArgumentError("Can't fuse layer with activation $(activation_fn(layer))."))
+    μ, σ² = st_bn.running_mean, st_bn.running_var
+    γ = haskey(ps_bn, :scale) ? ps_bn.scale : one.(μ)  # BatchNorm(...; affine=false)
+    β = haskey(ps_bn, :bias) ? ps_bn.bias : zero.(μ)
+    scale = γ ./ sqrt.(σ² .+ bn.epsilon)
 
-# Fuse BatchNorm layers into Dense and Conv layers
-
-function canonize_fuse(d::Dense, bn::BatchNorm)
-    d.σ != identity &&
-        throw(ArgumentError("Can't fuse Dense layer with activation $(d.σ)."))
-    scale = safedivide(bn.γ, sqrt.(bn.σ²))
-    W = scale .* d.weight
-    b = if d.bias != false
-        scale .* (d.bias - bn.μ) + bn.β
+    weight = fuse_weight(layer, ps_layer.weight, scale)
+    bias = if haskey(ps_layer, :bias)
+        scale .* (ps_layer.bias .- μ) .+ β
     else
-        -scale .* bn.μ + bn.β
+        β .- scale .* μ
     end
-    return Dense(W, b, bn.λ)
+    fused = setproperties(layer, (; activation=bn.activation, use_bias=static(true)))
+    return fused, (; weight, bias)
 end
 
-function canonize_fuse(c::Conv, bn::BatchNorm)
-    c.σ != identity && throw(ArgumentError("Can't fuse Conv layer with activation $(c.σ)."))
-    scale = safedivide(bn.γ, sqrt.(bn.σ²))
-    W = c.weight .* reshape(scale, 1, 1, 1, :)
-    b = if c.bias != false
-        scale .* (c.bias - bn.μ) + bn.β
-    else
-        -scale .* bn.μ + bn.β
-    end
-    return Conv(bn.λ, W, b, c.stride, c.pad, c.dilation, c.groups)
+# Scale the weight along its output dimension:
+# rows for Dense, the trailing output-channel dimension for Conv.
+fuse_weight(::Dense, w::AbstractMatrix, scale) = scale .* w
+function fuse_weight(::Conv, w::AbstractArray, scale)
+    return w .* reshape(scale, ntuple(Returns(1), ndims(w) - 1)..., :)
 end

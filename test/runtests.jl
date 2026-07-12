@@ -18,6 +18,10 @@ using Test
         @info "Testing model checks..."
         include("test_checks.jl")
     end
+    @testset "Canonize" begin
+        @info "Testing model canonization..."
+        include("test_canonize.jl")
+    end
     @testset "LRP rules" begin
         @info "Testing LRP rules..."
         include("test_rules.jl")
@@ -39,7 +43,6 @@ using Test
     # tests inside test_rules.jl, test_utils.jl and test_chain_utils.jl.)
     @testset verbose = true "Not yet ported" begin
         for file in [
-            "test_canonize.jl: canonize and canonize_fuse (phase 5)",
             "test_crp.jl: CRP analyzer (phase 6)",
             "test_cnn.jl: CNN reference tests (phase 7)",
             "test_batches.jl: batch consistency on CNN (phase 7)",

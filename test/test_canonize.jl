@@ -1,15 +1,22 @@
 using RelevancePropagation
 using Test
 
-using Flux
-using Flux: flatten, Scale
-using RelevancePropagation: canonize_fuse
-using Random
+using Lux
+using Random: AbstractRNG
 using StableRNGs: StableRNG
+using RelevancePropagation: canonize_fuse
 
-pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
+# Also usable as a Lux `init_*` function
+pseudorand(rng::AbstractRNG, dims...) = rand(rng, Float32, dims...)
 
 batchsize = 50
+
+# Collect BatchNorm statistics by applying the model in train mode,
+# then switch to test mode.
+function collect_stats(model, ps, st, x)
+    _, st = Lux.apply(model, x, ps, Lux.trainmode(st))
+    return Lux.testmode(st)
+end
 
 ##=====================================#
 # Test `canonize_fuse` on Dense layer #
@@ -17,36 +24,38 @@ batchsize = 50
 
 ins = 10
 outs = 5
-dense = Dense(ins, outs; init=pseudorand)
-bn_dense = BatchNorm(outs, relu; initβ=pseudorand, initγ=pseudorand)
+dense = Dense(ins => outs)
+bn_dense = BatchNorm(outs, relu; init_bias=pseudorand, init_scale=pseudorand)
 model = Chain(dense, bn_dense)
+ps, st = Lux.setup(StableRNG(123), model)
 
-# collect statistics
-x = pseudorand(ins, batchsize)
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
+x = pseudorand(StableRNG(123), ins, batchsize)
+st = collect_stats(model, ps, st, x)
 
-dense_fused = @inferred canonize_fuse(dense, bn_dense)
-@test dense_fused(x) ≈ model(x)
+dense_fused, ps_fused = @inferred canonize_fuse(
+    dense, ps.layer_1, bn_dense, ps.layer_2, st.layer_2
+)
+@test first(Lux.apply(dense_fused, x, ps_fused, NamedTuple())) ≈
+    first(Lux.apply(model, x, ps, st))
 
 ##====================================#
 # Test `canonize_fuse` on Conv layer  #
 #=====================================#
 
 insize = (10, 10, 3)
-conv = Conv((3, 3), 3 => 4; init=pseudorand)
-bn_conv = BatchNorm(4, relu; initβ=pseudorand, initγ=pseudorand)
+conv = Conv((3, 3), 3 => 4)
+bn_conv = BatchNorm(4, relu; init_bias=pseudorand, init_scale=pseudorand)
 model = Chain(conv, bn_conv)
+ps, st = Lux.setup(StableRNG(123), model)
 
-# collect statistics
-x = pseudorand(insize..., batchsize)
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
+x = pseudorand(StableRNG(123), insize..., batchsize)
+st = collect_stats(model, ps, st, x)
 
-conv_fused = @inferred canonize_fuse(conv, bn_conv)
-@test conv_fused(x) ≈ model(x)
+conv_fused, ps_fused = @inferred canonize_fuse(
+    conv, ps.layer_1, bn_conv, ps.layer_2, st.layer_2
+)
+@test first(Lux.apply(conv_fused, x, ps_fused, NamedTuple())) ≈
+    first(Lux.apply(model, x, ps, st))
 
 ##=====================================#
 # Test `canonize` on sequential models #
@@ -61,26 +70,24 @@ model = Chain(
     BatchNorm(2),
     BatchNorm(2, softplus),
     BatchNorm(2),
-    flatten,
-    Dense(72, 10; bias=false),
+    FlattenLayer(),
+    Dense(72 => 10; use_bias=false),
     BatchNorm(10),
     BatchNorm(10),
     BatchNorm(10, relu),
     BatchNorm(10),
-    Dense(10, 10, gelu),
+    Dense(10 => 10, gelu),
     BatchNorm(10),
     softmax,
 )
+ps, st = Lux.setup(StableRNG(123), model)
+st = collect_stats(model, ps, st, x)
+model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
 
-# collect statistics
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
-model_canonized = canonize(model)
-
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 9 # 15 - 6
-@test model(x) ≈ model_canonized(x)
+@test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
+    first(Lux.apply(model, x, ps, st))
 
 ##===================================#
 # Test `canonize` on nested models   #
@@ -96,16 +103,14 @@ model = Chain(
         Chain(Conv((3, 3), 6 => 7, identity), BatchNorm(7)),
     ),
 )
+ps, st = Lux.setup(StableRNG(123), model)
+st = collect_stats(model, ps, st, x)
+model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
 
-# collect statistics
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
-model_canonized = canonize(model)
-
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 4 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 4
-@test model(x) ≈ model_canonized(x)
+@test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
+    first(Lux.apply(model, x, ps, st))
 
 ##================================================#
 # Test `canonize` on  models w/ Parallel layers   #
@@ -118,7 +123,7 @@ model = Chain(
         +,
         Conv((3, 3), 4 => 5, identity),
         Chain(
-            Conv((3, 3), 4 => 5, identity; bias=false), # fuse
+            Conv((3, 3), 4 => 5, identity; use_bias=false), # fuse
             BatchNorm(5),
         ),
         Chain(
@@ -129,68 +134,66 @@ model = Chain(
     Conv((3, 3), 5 => 6, identity), # fuse
     BatchNorm(6),
 )
-
-# collect statistics
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
-model_canonized = canonize(model)
+ps, st = Lux.setup(StableRNG(123), model)
+st = collect_stats(model, ps, st, x)
+model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
 
 @test length(model_canonized) == 3
-@test length(model_canonized[2][2]) == 1
-@test length(model_canonized[2][3]) == 2
-@test model(x) ≈ model_canonized(x)
+parallel_canonized = model_canonized[2]
+@test length(parallel_canonized.layers.layer_2) == 1
+@test length(parallel_canonized.layers.layer_3) == 2
+@test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
+    first(Lux.apply(model, x, ps, st))
 
 ##======================================================#
 # Test `canonize` on  models w/ SkipConnection layers   #
 # and with layers that have to be split (LayerNorm)     #
 #=======================================================#
-x = pseudorand(5, batchsize)
+x = pseudorand(StableRNG(123), 5, batchsize)
 
 model = Chain(
-    LayerNorm(5), # split
+    LayerNorm((5,)), # split
     Parallel(
         +,
-        LayerNorm(5), # split
+        LayerNorm((5,)), # split
         Chain(
             Dense(5 => 5), # fuse
             BatchNorm(5),
         ),
         Chain(
-            LayerNorm(5), # split
+            LayerNorm((5,)), # split
         ),
     ),
     SkipConnection(
-        LayerNorm(5), # split
+        LayerNorm((5,)), # split
         +,
     ),
     SkipConnection(Chain(
-        LayerNorm(5),
+        LayerNorm((5,)),
         Dense(5 => 5), # split
     ), +),
     SkipConnection(Chain(
-        Dense(5 => 5), # split
+        Dense(5 => 5), # fuse
         BatchNorm(5),
     ), +),
     Dense(5 => 5), # fuse
     BatchNorm(5),
 )
-
-Flux.testmode!(model, false)
-model(x)
-Flux.testmode!(model, true)
-model_canonized = canonize(model)
+ps, st = Lux.setup(StableRNG(123), model)
+st = collect_stats(model, ps, st, x)
+model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
 
 @test length(model_canonized) == 7
 
 # Check parallel layer
 parallel_canonized = model_canonized[3]
-@test length(parallel_canonized[1]) == 2
-@test length(parallel_canonized[2]) == 1
-@test length(parallel_canonized[3]) == 2
+@test length(parallel_canonized.layers.layer_1) == 2
+@test length(parallel_canonized.layers.layer_2) == 1
+@test length(parallel_canonized.layers.layer_3) == 2
 
 # Check three SkipConnection layers
 @test length(model_canonized[4].layers) == 2
 @test length(model_canonized[5].layers) == 3
 @test length(model_canonized[6].layers) == 1
-@test model(x) ≈ model_canonized(x)
+@test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
+    first(Lux.apply(model, x, ps, st))
