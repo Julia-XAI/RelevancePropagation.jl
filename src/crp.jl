@@ -9,6 +9,10 @@ with respect to specific features in a given layer.
 - `layer::Int`: Index of layer after which the concept is located
 - `features`: Concept / feature to explain.
 
+Since layers are indexed positionally, CRP assumes a flat model:
+apply [`flatten_model`](@ref) to the model triple before constructing
+the [`LRP`](@ref) analyzer.
+
 See also [`TopNFeatures`](@ref) and [`IndexedFeatures`](@ref).
 
 # References
@@ -35,16 +39,16 @@ end
 function call_analyzer(
     input::AbstractArray{T,N}, crp::CRP, ns::AbstractOutputSelector
 ) where {T,N}
-    # Unpack internal LRP analyzer
-    (; model, rules, modified_layers, normalize_output_relevance) = crp.lrp
-    layers = model.layers
+    # Unpack internal LRP analyzer, matching layers positionally
+    (; rules, layers, modified_layers, normalize_output_relevance) = crp.lrp
+    rs, ls, ms = values(rules), values(layers), values(modified_layers)
 
-    n_layers = length(layers)
+    n_layers = length(ls)
     n_features = number_of_features(crp.features)
     batchsize = size(input, N)
 
     # Forward pass
-    as = get_activations(crp.lrp.model, input) # compute activations aᵏ for all layers k
+    as = get_activations(layers, input) # compute activations aᵏ for all layers k
     Rs = similar.(as) # allocate relevances Rᵏ for all layers k
     mask_output_neuron!(Rs[end], as[end], ns, normalize_output_relevance) # compute relevance Rᴺ of output layer N
 
@@ -54,7 +58,7 @@ function call_analyzer(
 
     # Compute regular LRP backward pass until feature layer
     for k in n_layers:-1:(crp.layer + 1)
-        lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k + 1])
+        lrp!(Rs[k], rs[k], ls[k], ms[k], as[k], Rs[k + 1])
     end
 
     # Save full relevance at feature layer before masking
@@ -75,7 +79,7 @@ function call_analyzer(
 
         # Continue LRP backward pass
         for k in (crp.layer):-1:1
-            lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k + 1])
+            lrp!(Rs[k], rs[k], ls[k], ms[k], as[k], Rs[k + 1])
         end
 
         # Write relevance into a slice of R_return

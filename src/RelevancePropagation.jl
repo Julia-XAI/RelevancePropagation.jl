@@ -4,6 +4,7 @@ using Reexport: @reexport
 import XAIBase: call_analyzer
 using XAIBase: XAIBase, AbstractXAIMethod, Explanation
 using XAIBase: AbstractOutputSelector
+using XAIBase: AbstractFeatureSelector, number_of_features
 
 using Lux: Lux, Chain, Parallel, SkipConnection
 using Lux: Dense, Scale, Conv, ConvTranspose
@@ -38,10 +39,10 @@ include("lrp.jl")
 include("show.jl")
 include("composite_presets.jl") # uses show.jl
 include("canonize.jl")
-# Not yet ported to Lux/Enzyme (v4.0.0 rewrite, see PLAN.md):
-# include("crp.jl")               # phase 6
+include("crp.jl")
 
 export LRP
+export CRP
 
 # LRP rules
 export AbstractLRPRule

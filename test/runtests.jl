@@ -34,6 +34,10 @@ using Test
         @info "Testing LRP composites..."
         include("test_composite.jl")
     end
+    @testset "CRP" begin
+        @info "Testing CRP..."
+        include("test_crp.jl")
+    end
 
     # The v3 test files below depend on Flux and on functionality that is not
     # ported yet (v4.0.0 Lux/Enzyme rewrite, see PLAN.md). They cannot be
@@ -43,7 +47,6 @@ using Test
     # tests inside test_rules.jl, test_utils.jl and test_chain_utils.jl.)
     @testset verbose = true "Not yet ported" begin
         for file in [
-            "test_crp.jl: CRP analyzer (phase 6)",
             "test_cnn.jl: CNN reference tests (phase 7)",
             "test_batches.jl: batch consistency on CNN (phase 7)",
             "test_benchmarks.jl: PkgJogger benchmark suite (phase 7)",
