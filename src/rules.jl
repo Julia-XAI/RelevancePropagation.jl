@@ -144,6 +144,10 @@ function modify_layer(rule, layer::FrozenLayer; keep_bias=true)
     return FrozenLayer(remove_activation(layer.layer), ps, layer.st)
 end
 
+# Useful presets, used e.g. in AlphaBetaRule, ZBoxRule & ZPlusRule:
+modify_parameters(::Val{:keep_positive}, p) = keep_positive(p)
+modify_parameters(::Val{:keep_negative}, p) = keep_negative(p)
+
 #===========#
 # LRP Rules #
 #===========#
