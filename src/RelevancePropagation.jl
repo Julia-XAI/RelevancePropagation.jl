@@ -61,7 +61,7 @@ export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
 export EpsilonAlpha2Beta1Flat
 
 # Model utilities
-export strip_softmax
+export strip_softmax, flatten_model
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer

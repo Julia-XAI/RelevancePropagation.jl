@@ -55,3 +55,61 @@ Returns last layer of a Lux `Chain`, descending into nested `Chain`s.
 """
 last_element(c::Chain) = last_element(last(values(c.layers)))
 last_element(layer) = layer
+
+#===============#
+# Flatten model #
+#===============#
+
+"""
+    flatten_model(model, ps, st)
+
+Flatten a Lux `Chain` containing nested `Chain`s.
+Returns a `(model, ps, st)` triple whose layers are re-keyed to
+`layer_1, ..., layer_N`; since this re-keys `ps` and `st` as well,
+the transformation is joint over the Lux triple.
+
+`Parallel` and `SkipConnection` layers keep their container,
+but their branches are flattened internally.
+"""
+function flatten_model(model::Chain, ps, st)
+    layers, pss, sts = flatten_chain(model, ps, st)
+    flat_model = Chain(layers...)
+    ks = keys(flat_model.layers)
+    return flat_model, NamedTuple{ks}(Tuple(pss)), NamedTuple{ks}(Tuple(sts))
+end
+
+# Return vectors of layer, ps and st entries with nested `Chain`s spliced in.
+function flatten_chain(c::Chain, ps, st)
+    layers, pss, sts = [], [], []
+    for k in keys(c.layers)
+        layer, p, s = flatten_layer(c.layers[k], ps[k], st[k])
+        if layer isa Chain
+            append!(layers, values(layer.layers))
+            append!(pss, values(p))
+            append!(sts, values(s))
+        else
+            push!(layers, layer)
+            push!(pss, p)
+            push!(sts, s)
+        end
+    end
+    return layers, pss, sts
+end
+
+# Flatten the insides of a layer.
+flatten_layer(layer, ps, st) = layer, ps, st
+flatten_layer(c::Chain, ps, st) = flatten_model(c, ps, st)
+function flatten_layer(p::Parallel, ps, st)
+    ks = keys(p.layers)
+    branches = map(k -> flatten_layer(p.layers[k], ps[k], st[k]), ks)
+    layers = NamedTuple{ks}(map(first, branches))
+    flat_ps = NamedTuple{ks}(map(b -> b[2], branches))
+    flat_st = NamedTuple{ks}(map(b -> b[3], branches))
+    return setproperties(p, (; layers)), flat_ps, flat_st
+end
+function flatten_layer(s::SkipConnection, ps, st)
+    # `SkipConnection` is an `AbstractLuxWrapperLayer`:
+    # its `ps`/`st` pass through to the wrapped layer directly.
+    inner, flat_ps, flat_st = flatten_layer(s.layers, ps, st)
+    return setproperties(s, (; layers=inner)), flat_ps, flat_st
+end
