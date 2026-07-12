@@ -372,3 +372,135 @@ function lrp!(Rᵏ, rule::ZPlusRule, layer::FrozenLayer, modified_layers, aᵏ, 
     c⁻ = back⁻(s)
     @. Rᵏ = aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
 end
+
+"""
+    AlphaBetaRule([alpha=$(LRP_DEFAULT_ALPHA), beta=$(LRP_DEFAULT_BETA)])
+
+LRP-``αβ`` rule. Weights positive and negative contributions according to the
+parameters `alpha` and `beta` respectively. The difference ``α-β`` must be equal to one.
+Commonly used on lower layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\left(
+    \\alpha\\frac{\\left(W_{ij}a_j^k\\right)^+}{\\sum_l\\left(W_{il}a_l^k+b_i\\right)^+}
+    -\\beta\\frac{\\left(W_{ij}a_j^k\\right)^-}{\\sum_l\\left(W_{il}a_l^k+b_i\\right)^-}
+\\right) R_i^{k+1}
+```
+
+# Optional arguments
+- `alpha`: Multiplier for the positive output term, defaults to `$(LRP_DEFAULT_ALPHA)`.
+- `beta`: Multiplier for the negative output term, defaults to `$(LRP_DEFAULT_BETA)`.
+
+# References
+- $REF_BACH_LRP
+- $REF_MONTAVON_OVERVIEW
+"""
+struct AlphaBetaRule{T<:Real} <: AbstractLRPRule
+    α::T
+    β::T
+    function AlphaBetaRule(alpha=LRP_DEFAULT_ALPHA, beta=LRP_DEFAULT_BETA)
+        alpha < 0 && throw(ArgumentError("Parameter `alpha` must be ≥0."))
+        beta < 0 && throw(ArgumentError("Parameter `beta` must be ≥0."))
+        !isone(alpha - beta) && throw(ArgumentError("`alpha - beta` must be equal one."))
+        return new{eltype(alpha)}(alpha, beta)
+    end
+end
+function modify_layer(::AlphaBetaRule, layer::FrozenLayer)
+    return (
+        layerᵅ⁺ = modify_layer(Val(:keep_positive), layer),
+        layerᵅ⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
+        layerᵝ⁻ = modify_layer(Val(:keep_negative), layer),
+        layerᵝ⁺ = modify_layer(Val(:keep_positive), layer; keep_bias=false),
+    )
+end
+
+function lrp!(Rᵏ, rule::AlphaBetaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+    aᵏ⁺ = keep_positive(aᵏ)
+    aᵏ⁻ = keep_negative(aᵏ)
+
+    # The α- and β-variants share weights and only differ in their biases,
+    # so their VJPs agree and each pullback is reused for both seeds.
+    # A width-2 pullback computes both VJPs in one forward and reverse pass;
+    # this is safe because AlphaBetaRule is restricted to weight-bias layers
+    # (width-2 thunks crash Enzyme on pooling/normalization layers).
+    zᵅ⁺, back2⁺ = layer_pullback_2seeds(modified_layers.layerᵅ⁺, aᵏ⁺)
+    zᵅ⁻, back2⁻ = layer_pullback_2seeds(modified_layers.layerᵅ⁻, aᵏ⁻)
+    # No need to linearize again: Wᵝ⁺ = Wᵅ⁺ and Wᵝ⁻ = Wᵅ⁻
+    zᵝ⁺ = modified_layers.layerᵝ⁺(aᵏ⁻)
+    zᵝ⁻ = modified_layers.layerᵝ⁻(aᵏ⁺)
+
+    sᵅ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵅ⁺ + zᵅ⁻)
+    sᵝ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵝ⁺ + zᵝ⁻)
+    cᵅ⁺, cᵝ⁺ = back2⁺(sᵅ, sᵝ)
+    cᵅ⁻, cᵝ⁻ = back2⁻(sᵅ, sᵝ)
+
+    T = eltype(aᵏ)
+    α = convert(T, rule.α)
+    β = convert(T, rule.β)
+    @. Rᵏ = α * (aᵏ⁺ * cᵅ⁺ + aᵏ⁻ * cᵅ⁻) - β * (aᵏ⁺ * cᵝ⁻ + aᵏ⁻ * cᵝ⁺)
+end
+
+"""
+    GeneralizedGammaRule([gamma=$(LRP_DEFAULT_GAMMA)])
+
+Generalized LRP-``γ`` rule. Can be used on layers with `leakyrelu` activation functions.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = \\sum_i\\frac
+    {(W_{ij}+\\gamma W_{ij}^+)a_j^+ +(W_{ij}+\\gamma W_{ij}^-)a_j^-}
+    {\\sum_l(W_{il}+\\gamma W_{il}^+)a_j^+ +(W_{il}+\\gamma W_{il}^-)a_j^- +(b_i+\\gamma b_i^+)}
+I(z_k>0) \\cdot R^{k+1}_i
++\\sum_i\\frac
+    {(W_{ij}+\\gamma W_{ij}^-)a_j^+ +(W_{ij}+\\gamma W_{ij}^+)a_j^-}
+    {\\sum_l(W_{il}+\\gamma W_{il}^-)a_j^+ +(W_{il}+\\gamma W_{il}^+)a_j^- +(b_i+\\gamma b_i^-)}
+I(z_k<0) \\cdot R^{k+1}_i
+```
+
+# Optional arguments
+- `gamma`: Optional multiplier for added positive weights, defaults to `$(LRP_DEFAULT_GAMMA)`.
+
+# References
+- $REF_ANDEOL_DOMAIN_INVARIANT
+"""
+struct GeneralizedGammaRule{T<:Real} <: AbstractLRPRule
+    γ::T
+    GeneralizedGammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
+end
+function modify_layer(rule::GeneralizedGammaRule, layer::FrozenLayer)
+    # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation
+    rule⁺ = GammaRule(rule.γ)
+    rule⁻ = NegativeGammaRule(rule.γ)
+    return (
+        layerˡ⁺ = modify_layer(rule⁺, layer),
+        layerˡ⁻ = modify_layer(rule⁻, layer; keep_bias=false),
+        layerʳ⁻ = modify_layer(rule⁻, layer),
+        layerʳ⁺ = modify_layer(rule⁺, layer; keep_bias=false),
+    )
+end
+
+function lrp!(
+    Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹
+)
+    aᵏ⁺ = keep_positive(aᵏ)
+    aᵏ⁻ = keep_negative(aᵏ)
+
+    # Width-2 pullbacks as in AlphaBetaRule: the ˡ/ʳ-variants share weights,
+    # and GeneralizedGammaRule is restricted to weight-bias layers.
+    zˡ⁺, back2⁺ = layer_pullback_2seeds(modified_layers.layerˡ⁺, aᵏ⁺)
+    zˡ⁻, back2⁻ = layer_pullback_2seeds(modified_layers.layerˡ⁻, aᵏ⁻)
+    # No need to linearize again: Wˡ⁺ = Wʳ⁺ and Wˡ⁻ = Wʳ⁻
+    zʳ⁺ = modified_layers.layerʳ⁺(aᵏ⁻)
+    zʳ⁻ = modified_layers.layerʳ⁻(aᵏ⁺)
+    # Unmodified layer, including its (leakyrelu) activation:
+    z = layer(aᵏ)
+
+    sˡ = masked_copy(Rᵏ⁺¹, z .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
+    sʳ = masked_copy(Rᵏ⁺¹, z .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
+    cˡ⁺, cʳ⁺ = back2⁺(sˡ, sʳ)
+    cˡ⁻, cʳ⁻ = back2⁻(sˡ, sʳ)
+    @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
+end
