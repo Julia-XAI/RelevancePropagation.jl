@@ -23,12 +23,16 @@ unknown_function(x) = x
 
 @test_throws err check_lrp_compat(
     Chain(
-        Dense(2 => 2), Parallel(+, Dense(2 => 2), Dense(2 => 2, softmax)), Dense(2 => 2, relu)
+        Dense(2 => 2),
+        Parallel(+, Dense(2 => 2), Dense(2 => 2, softmax)),
+        Dense(2 => 2, relu),
     );
     verbose=false,
 )
 @test check_lrp_compat(
-    Chain(Dense(2 => 2), Parallel(+, Dense(2 => 2), Dense(2 => 2, relu)), Dense(2 => 2, relu));
+    Chain(
+        Dense(2 => 2), Parallel(+, Dense(2 => 2), Dense(2 => 2, relu)), Dense(2 => 2, relu)
+    );
     verbose=false,
 )
 
@@ -49,7 +53,9 @@ io = IOBuffer()
 print_lrp_model_check(
     io,
     Chain(
-        Dense(2 => 2), Parallel(+, Dense(2 => 2), Dense(2 => 2, softmax)), Dense(2 => 2, relu)
+        Dense(2 => 2),
+        Parallel(+, Dense(2 => 2), Dense(2 => 2, softmax)),
+        Dense(2 => 2, relu),
     ),
 )
 check_lrp_compat_output = String(take!(io))

@@ -104,7 +104,9 @@ flat_triple(model) = flatten_model(model, Lux.setup(StableRNG(123), model)...)
     Chain(abs, sqrt, relu)
 @test first(flat_triple(Chain(abs, sqrt, relu))) == Chain(abs, sqrt, relu)
 @test first(
-    flat_triple(Chain(Chain(Parallel(+, Chain(Chain(NoOpLayer())), Chain(Chain(NoOpLayer()))))))
+    flat_triple(
+        Chain(Chain(Parallel(+, Chain(Chain(NoOpLayer())), Chain(Chain(NoOpLayer())))))
+    ),
 ) == Chain(Parallel(+, Chain(NoOpLayer()), Chain(NoOpLayer())))
 @test first(flat_triple(Chain(Chain(SkipConnection(Chain(Chain(NoOpLayer())), +))))) ==
     Chain(SkipConnection(Chain(NoOpLayer()), +))
