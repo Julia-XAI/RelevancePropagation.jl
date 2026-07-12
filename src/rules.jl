@@ -281,6 +281,28 @@ modify_bias(::FlatRule, b) = zero(b)
 # The convention used here is to return multiple modified layers as named tuples.
 
 """
+    PassRule()
+
+Pass-through rule. Passes relevance through to the lower layer.
+
+Supports layers with constant input and output shapes, e.g. reshaping layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_j^k = R_j^{k+1}
+```
+"""
+struct PassRule <: AbstractLRPRule end
+function lrp!(Rᵏ, ::PassRule, layer::FrozenLayer, _modified_layer, aᵏ, Rᵏ⁺¹)
+    return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
+end
+modify_layer(::PassRule, layer::FrozenLayer) = nothing # no modified layer needed
+is_compatible(::PassRule, layer::FrozenLayer) = true
+
+reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹) = Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
+
+"""
     ZBoxRule(low, high)
 
 LRP-``zᴮ``-rule. Commonly used on the first layer for pixel input.
@@ -503,4 +525,68 @@ function lrp!(
     cˡ⁺, cʳ⁺ = back2⁺(sˡ, sʳ)
     cˡ⁻, cʳ⁻ = back2⁻(sˡ, sʳ)
     @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
+end
+
+"""
+    LayerNormRule()
+
+LRP-LN rule. Used on `LayerNorm` layers.
+
+# Definition
+Propagates relevance ``R^{k+1}`` at layer output to ``R^k`` at layer input according to
+```math
+R_i^k = \\sum_j\\frac{a_i^k\\left(\\delta_{ij} - 1/N\\right)}{\\sum_l a_l^k\\left(\\delta_{lj}-1/N\\right)} R_j^{k+1}
+```
+Relevance through the affine transformation is by default propagated using the [`ZeroRule`](@ref).
+
+If you would like to assign a special rule to the affine transformation inside of the `LayerNorm` layer,
+call `canonize` on your model.
+This will split the `LayerNorm` layer into
+1. a `LayerNorm` layer without affine transformation
+2. a `Scale` layer implementing the affine transformation
+You can then assign separate rules to these two layers.
+
+## Note
+Statistics are computed over the dimensions the layer normalizes over:
+Lux's default `dims=Colon()` normalizes over all dimensions, including the batch
+dimension. Set `dims=1:length(shape)` on the `LayerNorm` layer for the per-sample
+normalization v3 (Flux) applied.
+
+# References
+- $REF_ALI_TRANSFORMER
+"""
+struct LayerNormRule <: AbstractLRPRule end
+is_compatible(::LayerNormRule, ::FrozenLayer{<:LayerNorm}) = true
+
+function lrp!(
+    Rᵏ, ::LayerNormRule, f::FrozenLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹
+)
+    layer = f.layer
+    dims = layer.dims # Colon() means statistics over all dimensions
+    μₐ = mean(aᵏ; dims=dims)
+    z = aᵏ .- μₐ
+
+    if has_bias(f) # affine LayerNorm: Lux stores its parameters as ps.scale/ps.bias
+        # Forward pass through the normalization part, matching Lux's formula
+        # activation.(scale .* (x .- μ) ./ sqrt.(σ² .+ ϵ) .+ bias):
+        ϵ = convert(float(eltype(aᵏ)), layer.epsilon)
+        σ² = var(aᵏ; dims=dims, mean=μₐ, corrected=false)
+        aᵏₙ = @. z / sqrt(σ² + ϵ)
+        # Call ZeroRule on the affine part as a fallback when the model is not
+        # canonized. The Scale layer carries the activation; LRP removes it in
+        # modify_layer.
+        scale = FrozenLayer(
+            Scale(layer.shape, layer.activation),
+            (; weight=f.ps.scale, bias=f.ps.bias),
+            NamedTuple(),
+        )
+        lrp!(Rᵏ, ZeroRule(), scale, modify_layer(ZeroRule(), scale), aᵏₙ, Rᵏ⁺¹)
+    else
+        Rᵏ .= Rᵏ⁺¹
+    end
+    # LRP pass through the normalization
+    s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
+    μₛ = mean(s; dims=dims)
+    @. Rᵏ = aᵏ * (s - μₛ)
+    return Rᵏ
 end

@@ -20,6 +20,7 @@ using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
 using ConstructionBase: setproperties
 using NNlib: relu, gelu, swish, mish, softmax, softmax!
 using Markdown: @md_str
+using Statistics: mean, var
 
 @reexport using XAIBase
 
@@ -45,6 +46,7 @@ export AbstractLRPRule
 export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
+export PassRule, LayerNormRule
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
