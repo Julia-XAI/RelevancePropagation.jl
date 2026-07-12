@@ -1,87 +1,74 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: activation_fn, copy_layer, flatten_model
+using RelevancePropagation: FrozenLayer, activation_fn, remove_activation
+using RelevancePropagation: has_weight, has_bias
+using RelevancePropagation: chainall, first_element, last_element
 using RelevancePropagation: has_output_softmax, check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 
-using Flux
-using Flux: flatten, Scale
-using Random: rand
+using Lux
 using StableRNGs: StableRNG
 
-pseudorand(dims...) = rand(StableRNG(123), Float32, dims...)
+frozen_layer(layer) = FrozenLayer(layer, Lux.setup(StableRNG(123), layer)...)
 
 # Test `activation_fn`
-@test activation_fn(Dense(5, 2, gelu)) == gelu
-for T in (BatchNorm, LayerNorm, InstanceNorm)
-    @test activation_fn(T(5, selu)) == selu
-end
+@test activation_fn(Dense(5 => 2, gelu)) == gelu
+@test activation_fn(BatchNorm(5, selu)) == selu
+@test activation_fn(InstanceNorm(5, selu)) == selu
 @test activation_fn(GroupNorm(4, 2, selu)) == selu
-for T in (Conv, ConvTranspose, CrossCor)
-    @test activation_fn(T((5, 5), 3 => 2, softplus)) == softplus
-end
-@test activation_fn(Scale([1.0, 2.0, 3.0], false, relu)) == relu
-@test isnothing(activation_fn(flatten))
+@test activation_fn(LayerNorm((5,), selu)) == selu
+@test activation_fn(Conv((5, 5), 3 => 2, softplus)) == softplus
+@test activation_fn(ConvTranspose((5, 5), 3 => 2, softplus)) == softplus
+# v3's CrossCor is Lux's Conv with cross_correlation=true (same layer type)
+@test activation_fn(Conv((5, 5), 3 => 2, softplus; cross_correlation=true)) == softplus
+@test activation_fn(Scale(3, relu)) == relu
+@test isnothing(activation_fn(FlattenLayer()))
+@test isnothing(activation_fn(MaxPool((2, 2))))
+@test isnothing(activation_fn(WrappedFunction(relu)))
 
-# copy_layer
-for T in (Conv, ConvTranspose, CrossCor)
-    l1 = T((3, 3), 3 => 2, relu)
-    l2 = copy_layer(l1, 2 * l1.weight, 0.1 * l1.bias; σ=gelu)
-    @test l2.weight ≈ 2 * l1.weight
-    @test l2.bias ≈ 0.1 * l1.bias
-    @test activation_fn(l2) == gelu
+# remove_activation (replaces v3's `copy_layer`: parameters live in `ps`
+# NamedTuples now, so rule-modified copies are covered by `modify_layer`
+# tests in test_rules.jl)
+@test activation_fn(remove_activation(Dense(5 => 2, gelu))) == identity
+@test remove_activation(FlattenLayer()) == FlattenLayer()
+let l = remove_activation(Conv((3, 3), 3 => 2, relu; stride=2, pad=1))
+    @test activation_fn(l) == identity
+    @test l.stride == (2, 2) # other layer configuration is preserved
 end
 
-# flatten_model
-@test flatten_model(Chain(Chain(Chain(abs)), sqrt, Chain(relu))) == Chain(abs, sqrt, relu)
-@test flatten_model(Chain(abs, sqrt, relu)) == Chain(abs, sqrt, relu)
-@test flatten_model(
-    Chain(Chain(Parallel(+, Chain(Chain(identity)), Chain(Chain(identity)))))
-) == Chain(Parallel(+, Chain(identity), Chain(identity)))
-@test flatten_model(Chain(Chain(SkipConnection(Chain(Chain(identity)), +)))) ==
-    Chain(SkipConnection(Chain(identity), +))
-@test flatten_model(Chain(Chain(Dense(5 => 5), BatchNorm(5)))).layers isa Tuple
+# has_weight / has_bias on FrozenLayer
+@test has_weight(frozen_layer(Dense(2 => 2)))
+@test has_bias(frozen_layer(Dense(2 => 2)))
+@test has_weight(frozen_layer(Dense(2 => 2; use_bias=false)))
+@test !has_bias(frozen_layer(Dense(2 => 2; use_bias=false)))
+@test has_weight(frozen_layer(Scale(2)))
+@test has_bias(frozen_layer(Scale(2)))
+@test has_weight(frozen_layer(Conv((3, 3), 3 => 2)))
+@test !has_weight(frozen_layer(MaxPool((2, 2))))
+@test !has_weight(frozen_layer(BatchNorm(2))) # BatchNorm ps are (scale, bias)
+
+# chainall, first_element, last_element
+d = Dense(2 => 2)
+d_relu = Dense(2 => 3, relu)
+model = Chain(d, Chain(d, d_relu))
+@test chainall(l -> l isa Dense, model)
+@test !chainall(l -> activation_fn(l) == relu, model)
+@test chainall(l -> l isa Dense, Chain(d, Parallel(+, d, d), SkipConnection(d, +)))
+@test !chainall(l -> l isa Dense, Chain(d, Parallel(+, d, MaxPool((2, 2)))))
+@test first_element(model) == d
+@test last_element(model) == d_relu
 
 # has_output_softmax
-@test has_output_softmax(Chain(abs, sqrt, relu, softmax)) == true
-@test has_output_softmax(Chain(abs, sqrt, relu, tanh)) == false
-@test has_output_softmax(Chain(Chain(abs), sqrt, Chain(Chain(softmax)))) == true
-@test has_output_softmax(Chain(Chain(abs), Chain(Chain(softmax)), sqrt)) == false
-@test has_output_softmax(Chain(Dense(5, 5, softmax), Dense(5, 5, softmax))) == true
-@test has_output_softmax(Chain(Dense(5, 5, softmax), Dense(5, 5, relu))) == false
-@test has_output_softmax(Chain(Dense(5, 5, softmax), Chain(Dense(5, 5, softmax)))) == true
-@test has_output_softmax(Chain(Dense(5, 5, softmax), Chain(Dense(5, 5, relu)))) == false
+@test has_output_softmax(Chain(Dense(2 => 2), softmax)) == true
+@test has_output_softmax(Chain(Dense(2 => 2, softmax))) == true
+@test has_output_softmax(Chain(Dense(2 => 2), Chain(Chain(softmax)))) == true
+@test has_output_softmax(Chain(Dense(2 => 2, softmax), Dense(2 => 2, relu))) == false
+@test has_output_softmax(Chain(Dense(2 => 2), tanh)) == false
 
 # check_output_softmax
-@test_throws ArgumentError check_output_softmax(Chain(abs, sqrt, relu, softmax))
-
-# strip_softmax
-d_softmax  = Dense(2, 2, softmax; init=pseudorand)
-d_softmax2 = Dense(2, 2, softmax; init=pseudorand)
-d_relu     = Dense(2, 2, relu; init=pseudorand)
-d_identity = Dense(2, 2; init=pseudorand)
-# flatten to remove softmax
-m = strip_softmax(Chain(Chain(abs), sqrt, Chain(Chain(softmax))))
-@test m == Chain(Chain(abs), sqrt, Chain(Chain(identity)))
-m1 = strip_softmax(Chain(d_relu, Chain(d_softmax)))
-m2 = Chain(d_relu, Chain(d_identity))
-x = rand(Float32, 2, 10)
-@test typeof(m1) == typeof(m2)
-@test m1(x) == m2(x)
-# don't do anything if there is no softmax at the end
-@test strip_softmax(Chain(Chain(abs), Chain(Chain(softmax)), sqrt)) ==
-    Chain(Chain(abs), Chain(Chain(softmax)), sqrt)
-@test strip_softmax(Chain(d_softmax, Chain(d_relu))) == Chain(d_softmax, Chain(d_relu))
-@test strip_softmax(Chain(Parallel(+, softmax, softmax), d_softmax, Chain(d_relu))) ==
-    Chain(Parallel(+, softmax, softmax), d_softmax, Chain(d_relu))
-@test strip_softmax(Chain(SkipConnection(softmax, +), d_softmax, Chain(d_relu))) ==
-    Chain(SkipConnection(softmax, +), d_softmax, Chain(d_relu))
-# Ignore output softmax if in Parallel or SkipConnection dataflow layer
-@test strip_softmax(Chain(d_softmax, Chain(d_relu), Parallel(+, softmax, softmax))) ==
-    Chain(d_softmax, Chain(d_relu), Parallel(+, softmax, softmax))
-@test strip_softmax(Chain(d_softmax, Chain(d_relu), SkipConnection(softmax, +))) ==
-    Chain(d_softmax, Chain(d_relu), SkipConnection(softmax, +))
+@test_throws ArgumentError check_output_softmax(Chain(Dense(2 => 2), softmax))
+@test check_output_softmax(Chain(Dense(2 => 2), relu)) isa Chain
 
 # stabilize_denom
 A = [1.0 0.0 1.0e-25; -1.0 -0.0 -1.0e-25]
@@ -103,3 +90,43 @@ A    = [4  9  9; 9  6  9; 1  7  8]
 mask = Matrix{Bool}([0  1  1; 0  1  0; 1  1  1])
 mc   = @inferred masked_copy(A, mask)
 @test mc == [0  9  9; 0  6  0; 1  7  8]
+
+#=============================================================================#
+# The tests below are restored from v3 (Flux/Zygote) and adapted to Lux.     #
+# They cover model utilities that are not ported yet and are skipped until   #
+# their port lands (phase 5, see PLAN.md).                                   #
+#=============================================================================#
+
+# flatten_model (phase 5): v4 ports this as a joint transformation of
+# (model, ps, st), since flattening nested Chains re-keys `ps` and `st`.
+# The expectations below check the model part; ps/st re-keying gets its own
+# tests when the port lands.
+@test_skip first(flatten_model(Chain(Chain(Chain(abs)), sqrt, Chain(relu)))) ==
+    Chain(abs, sqrt, relu)
+@test_skip first(flatten_model(Chain(abs, sqrt, relu))) == Chain(abs, sqrt, relu)
+@test_skip first(
+    flatten_model(Chain(Chain(Parallel(+, Chain(Chain(NoOpLayer())), Chain(Chain(NoOpLayer()))))))
+) == Chain(Parallel(+, Chain(NoOpLayer()), Chain(NoOpLayer())))
+@test_skip first(flatten_model(Chain(Chain(SkipConnection(Chain(Chain(NoOpLayer())), +))))) ==
+    Chain(SkipConnection(Chain(NoOpLayer()), +))
+@test_skip first(flatten_model(Chain(Chain(Dense(5 => 5), BatchNorm(5))))).layers isa Tuple
+
+# strip_softmax (phase 5): model-only in v4, `ps` stays untouched.
+@test_skip strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2))
+@test_skip strip_softmax(Chain(Dense(2 => 2, softmax))) == Chain(Dense(2 => 2, identity))
+@test_skip strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)))) ==
+    Chain(Chain(Dense(2 => 2)), Chain(Chain(identity)))
+@test_skip strip_softmax(Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, softmax)))) ==
+    Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, identity)))
+# don't do anything if there is no softmax at the end
+@test_skip strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))) ==
+    Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))
+@test_skip strip_softmax(Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))) ==
+    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))
+# Ignore output softmax if in Parallel or SkipConnection dataflow layer
+@test_skip strip_softmax(
+    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), Parallel(+, softmax, softmax))
+) == Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), Parallel(+, softmax, softmax))
+@test_skip strip_softmax(
+    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), SkipConnection(softmax, +))
+) == Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)), SkipConnection(softmax, +))

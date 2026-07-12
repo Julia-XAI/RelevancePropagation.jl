@@ -1,16 +1,23 @@
+# Restored from v3 and adapted to the v4 Lux port (see PLAN.md):
+# v3's ChainTuple/ParallelTuple/SkipConnectionTuple machinery (chain_utils.jl)
+# is replaced by NamedTuples mirroring the Lux `ps`/`st` structure.
+# - `chainmap`  → `map_layers`, returning nested NamedTuples keyed like `ps`
+# - `chainzip`  → zipping NamedTuples along the model tree; its user-facing
+#   behavior (rules zipped over layers, key-mismatch errors) is covered in
+#   test_lrp.jl via `get_modified_layers`
+# - `chainindices`/`ModelIndex` → `Functors.KeyPath` (lands in phase 4 with
+#   `LayerMap`/`show_layer_indices`); tests below are skipped until then
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: ChainTuple, ParallelTuple, SkipConnectionTuple
-using RelevancePropagation: ModelIndex, chainmap, chainindices, chainzip
-using RelevancePropagation: activation_fn
-using Flux
+using RelevancePropagation: map_layers, activation_fn
+using Lux
+using Functors: KeyPath
 
-x = rand(Float32, 2, 5)
-d1 = Dense(2, 2, relu)
-d2 = Dense(2, 2, selu)
-d3 = Dense(2, 2, gelu)
-d4 = Dense(2, 2, celu)
+d1 = Dense(2 => 2, relu)
+d2 = Dense(2 => 2, selu)
+d3 = Dense(2 => 2, gelu)
+d4 = Dense(2 => 2, celu)
 
 c1 = Chain(d1)
 c2 = Chain(d1, d2)
@@ -24,70 +31,38 @@ c9 = Chain(SkipConnection(SkipConnection(d1, +), +))
 c10 = Chain(d1, SkipConnection(d2, +))
 c11 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
 
-# pre-compute occuring hidden activations, where hXYZ = dX(dY(dZ(x))) = dX(hYZ)
-h1 = d1(x)
-h11 = d1(h1)
-h21 = d2(h1)
-h31 = d3(h1)
-h211 = d2(h11)
-h221 = d2(h21)
-h3221 = d3(h221)
-h331 = d3(d3(h1))
-h4p1 = d4(2 * h21 + h331) # output of Chain c6
-
-# Test chainmap
-@test chainmap(activation_fn, c1) == ChainTuple(relu)
-@test chainmap(activation_fn, c2) == ChainTuple(relu, selu)
-@test chainmap(activation_fn, c3) == ChainTuple(ChainTuple(relu, relu), selu)
-@test chainmap(activation_fn, c4) == ChainTuple(relu, ChainTuple(selu, selu))
-@test chainmap(activation_fn, c5) == ChainTuple(relu, ChainTuple(selu, selu), gelu)
-@test chainmap(activation_fn, c6) == ChainTuple(ParallelTuple(relu, relu))
-@test chainmap(activation_fn, c7) ==
-    ChainTuple(relu, ParallelTuple(selu, selu, ChainTuple(gelu, gelu)), celu)
-@test chainmap(activation_fn, c8) == ChainTuple(SkipConnectionTuple(relu))
-@test chainmap(activation_fn, c9) ==
-    ChainTuple(SkipConnectionTuple(SkipConnectionTuple(relu)))
-@test chainmap(activation_fn, c10) == ChainTuple(relu, SkipConnectionTuple(selu))
-@test chainmap(activation_fn, c11) ==
-    ChainTuple(relu, SkipConnectionTuple(ChainTuple(selu, gelu)), celu)
-
-const MI = ModelIndex
-@test chainindices(c1) == ChainTuple(MI(1))
-@test chainindices(c2) == ChainTuple(MI(1), MI(2))
-@test chainindices(c3) == ChainTuple(ChainTuple(MI(1, 1), MI(1, 2)), MI(2))
-@test chainindices(c4) == ChainTuple(MI(1), ChainTuple(MI(2, 1), MI(2, 2)))
-@test chainindices(c5) == ChainTuple(MI(1), ChainTuple(MI(2, 1), MI(2, 2)), MI(3))
-@test chainindices(c6) == ChainTuple(ParallelTuple(MI(1, 1), MI(1, 2)))
-@test chainindices(c7) == ChainTuple(
-    MI(1), ParallelTuple(MI(2, 1), MI(2, 2), ChainTuple(MI(2, 3, 1), MI(2, 3, 2))), MI(3)
+# Test map_layers (was: chainmap).
+# SkipConnection is an `AbstractLuxWrapperLayer`: its `ps`/`st` pass through to
+# the wrapped layer directly, so it is transparent in the mapped NamedTuples.
+@test map_layers(activation_fn, c1) == (; layer_1=relu)
+@test map_layers(activation_fn, c2) == (; layer_1=relu, layer_2=selu)
+@test map_layers(activation_fn, c3) ==
+    (; layer_1=(; layer_1=relu, layer_2=relu), layer_2=selu)
+@test map_layers(activation_fn, c4) ==
+    (; layer_1=relu, layer_2=(; layer_1=selu, layer_2=selu))
+@test map_layers(activation_fn, c5) ==
+    (; layer_1=relu, layer_2=(; layer_1=selu, layer_2=selu), layer_3=gelu)
+@test map_layers(activation_fn, c6) == (; layer_1=(; layer_1=relu, layer_2=relu))
+@test map_layers(activation_fn, c7) == (;
+    layer_1=relu,
+    layer_2=(; layer_1=selu, layer_2=selu, layer_3=(; layer_1=gelu, layer_2=gelu)),
+    layer_3=celu,
 )
-@test chainindices(c8) == ChainTuple(SkipConnectionTuple(MI(1, 1)))
-@test chainindices(c9) == ChainTuple(SkipConnectionTuple(SkipConnectionTuple(MI(1, 1, 1))))
-@test chainindices(c10) == ChainTuple(MI(1), SkipConnectionTuple(MI(2, 1)))
-@test chainindices(c11) ==
-    ChainTuple(MI(1), SkipConnectionTuple(ChainTuple(MI(2, 1, 1), MI(2, 1, 2))), MI(3))
+@test map_layers(activation_fn, c8) == (; layer_1=relu)
+@test map_layers(activation_fn, c9) == (; layer_1=relu)
+@test map_layers(activation_fn, c10) == (; layer_1=relu, layer_2=selu)
+@test map_layers(activation_fn, c11) ==
+    (; layer_1=relu, layer_2=(; layer_1=selu, layer_2=gelu), layer_3=celu)
 
-@test ModelIndex(1) ∈ ModelIndex(1)
-@test ModelIndex(1) ∉ ModelIndex(2)
-@test ModelIndex(1, 2) ∈ ModelIndex(1)
-@test ModelIndex(1, 2) ∉ ModelIndex(2)
-@test ModelIndex(1, 2) ∈ ModelIndex(1, 2)
-@test ModelIndex(1, 2, 3) ∈ ModelIndex(1, 2)
-@test ModelIndex(1, 2) ∉ ModelIndex(1, 2, 3)
-
-# Test chainzip
-t1 = ChainTuple(1, 2, 3)
-t2 = ChainTuple(4, 5, 6)
-t3 = ChainTuple(7, 8, 9)
-@test chainzip(+, t1, t2) == ChainTuple(5, 7, 9)
-@test chainzip(+, t1, t2, t3) == ChainTuple(12, 15, 18)
-@test chainzip(*, t1, t2, t3) == ChainTuple(28, 80, 162)
-
-@test chainzip(
-    +,
-    ChainTuple(1, ChainTuple(ParallelTuple(2, ChainTuple(3)))),
-    ChainTuple(4, ChainTuple(ParallelTuple(5, ChainTuple(6)))),
-) == ChainTuple(5, ChainTuple(ParallelTuple(7, ChainTuple(9))))
-
-@test_throws ErrorException chainzip(+, t1, ChainTuple(1, 2))
-@test_throws ErrorException chainzip(+, t1, ParallelTuple(1, 2, 3))
+# Layer indexing (was: chainindices/ModelIndex, becomes KeyPath in phase 4).
+# Un-skip and finalize the API when `LayerMap`/`show_layer_indices` land.
+@test_skip layer_indices(c2) == (; layer_1=KeyPath(:layer_1), layer_2=KeyPath(:layer_2))
+@test_skip layer_indices(c3) == (;
+    layer_1=(;
+        layer_1=KeyPath(:layer_1, :layer_1), layer_2=KeyPath(:layer_1, :layer_2)
+    ),
+    layer_2=KeyPath(:layer_2),
+)
+# Prefix-matching semantics used by LayerMap (was: `Base.in` on ModelIndex)
+@test_skip keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1))
+@test_skip !keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))

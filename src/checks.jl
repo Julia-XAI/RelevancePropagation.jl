@@ -31,6 +31,9 @@ end # LRP_CONFIG module
 lrp_check_layer(l) = lrp_check_layer_type(l) && lrp_check_activation(l)
 
 lrp_check_layer_type(l) = LRP_CONFIG.supports_layer(l)
+# Lux wraps bare functions used as layers in `WrappedFunction`;
+# users register the wrapped function itself via `LRP_CONFIG.supports_layer`.
+lrp_check_layer_type(l::WrappedFunction) = LRP_CONFIG.supports_layer(l.func)
 
 function lrp_check_activation(layer)
     f = activation_fn(layer)
@@ -55,6 +58,42 @@ function check_lrp_compat(model::Chain; verbose=true)
         error("Unknown layer or activation function found in model")
     end
     return true
+end
+
+function print_lrp_model_check(io::IO, model::DataflowLayer, indent::Int=0)
+    println(io, "  "^indent, nameof(typeof(model)), "(")
+    for layer in children_layers(model)
+        print_lrp_model_check(io, layer, indent + 1)
+    end
+    println(io, "  "^indent, indent == 0 ? ")" : "),")
+end
+
+function print_lrp_model_check(io::IO, layer, indent::Int=0)
+    print(io, "  "^indent, layer)
+    print(io, " => ")
+    print_layer_check(io, layer)
+    println(io, ",")
+end
+
+function print_layer_check(io, l)
+    layer_failed = !lrp_check_layer_type(l)
+    activ_failed = !lrp_check_activation(l)
+    activ = activation_fn(l)
+
+    if layer_failed && activ_failed
+        return printstyled(
+            io,
+            "unsupported or unknown activation function $activ and layer type";
+            color=:red,
+        )
+    elseif activ_failed
+        return printstyled(
+            io, "unsupported or unknown activation function $activ"; color=:red
+        )
+    elseif layer_failed
+        return printstyled(io, "unknown layer type"; color=:red)
+    end
+    return printstyled(io, "supported"; color=:green)
 end
 
 _MD_CHECK_FAILED = md"""# LRP model check failed
@@ -91,3 +130,27 @@ _MD_CHECK_FAILED = md"""# LRP model check failed
     Model checks can be skipped at your own risk by setting
     the `LRP` keyword argument `skip_checks=true`.
     """
+
+#=========================#
+# Strip output activation #
+#=========================#
+
+"""
+  check_output_softmax(model)
+
+Check whether model has softmax activation on output.
+Return the model if it doesn't, throw error otherwise.
+"""
+function check_output_softmax(model::Chain)
+    if has_output_softmax(model)
+        throw(ArgumentError("""Model contains softmax activation function on output.
+        Call `strip_softmax` on your model."""))
+    end
+    return model
+end
+
+has_output_softmax(model::Chain) = has_output_softmax(last_element(model))
+has_output_softmax(x) = is_softmax(x) || is_softmax(activation_fn(x))
+
+is_softmax(x) = x isa SoftmaxActivation
+is_softmax(l::WrappedFunction) = is_softmax(l.func)

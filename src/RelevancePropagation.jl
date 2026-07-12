@@ -1,65 +1,51 @@
 module RelevancePropagation
 
-using Base.Iterators
 using Reexport: @reexport
 import XAIBase: call_analyzer
 using XAIBase: XAIBase, AbstractXAIMethod, Explanation
-using XAIBase: AbstractOutputSelector, AbstractFeatureSelector, number_of_features
+using XAIBase: AbstractOutputSelector
 
-using MacroTools: @forward
-using Flux: Flux, Chain, Parallel, SkipConnection
-using Flux: Dense, Conv, ConvTranspose, CrossCor
-using Flux: BatchNorm, GroupNorm, InstanceNorm, LayerNorm, Scale
-using Flux:
+using Lux: Lux, Chain, Parallel, SkipConnection
+using Lux: Dense, Scale, Conv, ConvTranspose
+using Lux: BatchNorm, LayerNorm
+using Lux:
     MaxPool, MeanPool, AdaptiveMaxPool, AdaptiveMeanPool, GlobalMaxPool, GlobalMeanPool
-using Flux: AlphaDropout, Dropout, dropout
-using NNlib: relu, gelu, swish, mish, softmax, softmax!
-using MLUtils: MLUtils
+using Lux: Dropout, AlphaDropout, VariationalHiddenDropout
+using Lux: FlattenLayer, ReshapeLayer, NoOpLayer, WrappedFunction
+using Lux: apply, testmode
 
-using Zygote: pullback
+using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
+using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
+
+using ConstructionBase: setproperties
+using NNlib: relu, gelu, swish, mish, softmax, softmax!
 using Markdown: @md_str
-using Statistics: mean, std
 
 @reexport using XAIBase
 
 include("bibliography.jl")
+include("autodiff.jl")
 include("layer_types.jl")
 include("layer_utils.jl")
 include("utils.jl")
-include("canonize.jl")
 include("checks.jl")
 include("rules.jl")
-include("composite.jl")
 include("lrp.jl")
-include("show.jl")
-include("composite_presets.jl") # uses show.jl
-include("crp.jl")
+# Not yet ported to Lux/Enzyme (v4.0.0 rewrite, see PLAN.md):
+# include("composite.jl")         # phase 4
+# include("show.jl")              # phase 4
+# include("composite_presets.jl") # phase 4
+# include("canonize.jl")          # phase 5
+# include("crp.jl")               # phase 6
 
 export LRP
-export CRP
 
 # LRP rules
 export AbstractLRPRule
 export LRP_CONFIG
-export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
-export PassRule, ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
-export LayerNormRule
+export ZeroRule, EpsilonRule
 
-# LRP composites
-export Composite, AbstractCompositePrimitive
-export ChainTuple, ParallelTuple, SkipConnectionTuple
-export LayerMap, GlobalMap, RangeMap, FirstLayerMap, LastLayerMap
-export GlobalTypeMap, RangeTypeMap, FirstLayerTypeMap, LastLayerTypeMap
-export FirstNTypeMap
-export lrp_rules, show_layer_indices
-
-# Default composites
-export EpsilonGammaBox, EpsilonPlus, EpsilonAlpha2Beta1, EpsilonPlusFlat
-export EpsilonAlpha2Beta1Flat
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer
-
-# utils
-export strip_softmax, flatten_model, canonize
 
 end # module

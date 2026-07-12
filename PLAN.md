@@ -1,6 +1,7 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** planning complete, no code written yet.
+**Branch:** `ah/enzyme` · **Status:** Phase 1 (spike) and Phase 2 (core skeleton)
+complete; Phase 3 (rules) next.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
 simplifying the codebase along the way.
@@ -209,15 +210,15 @@ Design points:
    `WrappedFunction{typeof(f)}` (softmax checks must handle this).
 
 ### Phase 2 — Core skeleton
-- [ ] Swap deps in Project.toml (add Lux, Enzyme, Functors; drop Flux, Zygote,
+- [x] Swap deps in Project.toml (add Lux, Enzyme, Functors; drop Flux, Zygote,
       MacroTools, MLUtils).
-- [ ] Lux layer-type unions (`src/layer_types.jl`).
-- [ ] `layer_utils` on `ps` (activation field, `haskey(ps, :weight/:bias)`).
-- [ ] Activations collector (loop over `model.layers`, threading `st`).
-- [ ] New `LRP` struct: `model, ps, st_test, rules::NamedTuple, modified_ps::NamedTuple`.
-- [ ] `FrozenLayer` + `layer_pullback` Enzyme helper; generic `lrp!` using it
+- [x] Lux layer-type unions (`src/layer_types.jl`).
+- [x] `layer_utils` on `ps` (activation field, `haskey(ps, :weight/:bias)`).
+- [x] Activations collector (loop over `model.layers`, threading `st`).
+- [x] New `LRP` struct: `model, ps, st_test, rules::NamedTuple, modified_ps::NamedTuple`.
+- [x] `FrozenLayer` + `layer_pullback` Enzyme helper; generic `lrp!` using it
       (incl. the mechanical `only(back(s))` → `back(s)` change in all rules).
-- [ ] `ZeroRule` + `EpsilonRule`; one end-to-end MLP test green.
+- [x] `ZeroRule` + `EpsilonRule`; one end-to-end MLP test green.
 
 ### Phase 3 — All rules
 - [ ] Port `modify_*` family to operate on `ps` NamedTuples.
@@ -278,10 +279,16 @@ Optimize the branch history for commit-by-commit review (merge without squash):
 4. **Additive-first ordering.** New machinery (`FrozenLayer`, `layer_pullback` +
    its Zygote cross-check tests) lands before the commits that wire it in.
 5. **Tests ride with the feature they cover**, so every commit is green with
-   respect to the suite *as it exists at that commit*. The old Flux suite dies in
-   the same commit as the Flux code paths it tests (Phase 2 skeleton swap); from
-   there the new suite grows per phase. Unavoidably-red intermediate commits are
-   confined to Phase 2 and marked `[red]` in the subject.
+   respect to the suite *as it exists at that commit*. Unavoidably-red
+   intermediate commits are confined to Phase 2 and marked `[red]` in the
+   subject.
+   **Never delete tests** (user directive): v3 tests whose feature isn't ported
+   yet are adapted to the Lux API and marked `@test_skip`/`@test_broken` instead
+   — either guarded on `isdefined(RelevancePropagation, :SymbolName)` so they
+   activate automatically when the port lands (test_rules.jl), or as plain
+   `@test_skip` lines to un-skip in the porting commit (test_utils.jl,
+   test_chain_utils.jl). Whole v3 files that can't even be `include`d without
+   Flux keep `@test_broken` markers in runtests.jl until their phase.
 6. **Generated artifacts in dedicated commits.** JLD2 reference regeneration is a
    binary blob — commit the generating script first, the blobs second, never
    mixed with logic changes.
