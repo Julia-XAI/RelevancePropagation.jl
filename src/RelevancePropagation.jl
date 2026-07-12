@@ -18,6 +18,7 @@ using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
 using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
 
 using ConstructionBase: setproperties
+using Functors: KeyPath
 using NNlib: relu, gelu, swish, mish, softmax, softmax!
 using Markdown: @md_str
 using Statistics: mean, var
@@ -31,9 +32,9 @@ include("layer_utils.jl")
 include("utils.jl")
 include("checks.jl")
 include("rules.jl")
+include("composite.jl")
 include("lrp.jl")
 # Not yet ported to Lux/Enzyme (v4.0.0 rewrite, see PLAN.md):
-# include("composite.jl")         # phase 4
 # include("show.jl")              # phase 4
 # include("composite_presets.jl") # phase 4
 # include("canonize.jl")          # phase 5
@@ -47,6 +48,13 @@ export LRP_CONFIG
 export ZeroRule, EpsilonRule, GammaRule, WSquareRule, FlatRule
 export ZBoxRule, ZPlusRule, AlphaBetaRule, GeneralizedGammaRule
 export PassRule, LayerNormRule
+
+# LRP composites
+export Composite, AbstractCompositePrimitive
+export LayerMap, GlobalMap, RangeMap, FirstLayerMap, LastLayerMap
+export GlobalTypeMap, RangeTypeMap, FirstLayerTypeMap, LastLayerTypeMap
+export FirstNTypeMap
+export lrp_rules, show_layer_indices
 
 # Useful type unions
 export ConvLayer, PoolingLayer, DropoutLayer, ReshapingLayer, NormalizationLayer

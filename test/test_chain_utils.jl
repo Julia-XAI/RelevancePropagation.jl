@@ -5,12 +5,11 @@
 # - `chainzip`  → zipping NamedTuples along the model tree; its user-facing
 #   behavior (rules zipped over layers, key-mismatch errors) is covered in
 #   test_lrp.jl via `get_modified_layers`
-# - `chainindices`/`ModelIndex` → `Functors.KeyPath` (lands in phase 4 with
-#   `LayerMap`/`show_layer_indices`); tests below are skipped until then
+# - `chainindices`/`ModelIndex` → `layer_indices` on `Functors.KeyPath`
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: map_layers, activation_fn
+using RelevancePropagation: map_layers, activation_fn, layer_indices, keypath_in
 using Lux
 using Functors: KeyPath
 
@@ -54,15 +53,36 @@ c11 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
 @test map_layers(activation_fn, c11) ==
     (; layer_1=relu, layer_2=(; layer_1=selu, layer_2=gelu), layer_3=celu)
 
-# Layer indexing (was: chainindices/ModelIndex, becomes KeyPath in phase 4).
-# Un-skip and finalize the API when `LayerMap`/`show_layer_indices` land.
-@test_skip layer_indices(c2) == (; layer_1=KeyPath(:layer_1), layer_2=KeyPath(:layer_2))
-@test_skip layer_indices(c3) == (;
+# Layer indexing (was: chainindices/ModelIndex).
+# `layer_indices` mirrors the model structure with KeyPath leaves addressing
+# each layer like `ps`/`st`; SkipConnection stays transparent.
+@test layer_indices(c2) == (; layer_1=KeyPath(:layer_1), layer_2=KeyPath(:layer_2))
+@test layer_indices(c3) == (;
     layer_1=(;
         layer_1=KeyPath(:layer_1, :layer_1), layer_2=KeyPath(:layer_1, :layer_2)
     ),
     layer_2=KeyPath(:layer_2),
 )
+@test layer_indices(c7) == (;
+    layer_1=KeyPath(:layer_1),
+    layer_2=(;
+        layer_1=KeyPath(:layer_2, :layer_1),
+        layer_2=KeyPath(:layer_2, :layer_2),
+        layer_3=(;
+            layer_1=KeyPath(:layer_2, :layer_3, :layer_1),
+            layer_2=KeyPath(:layer_2, :layer_3, :layer_2),
+        ),
+    ),
+    layer_3=KeyPath(:layer_3),
+)
+@test layer_indices(c11) == (;
+    layer_1=KeyPath(:layer_1),
+    layer_2=(; layer_1=KeyPath(:layer_2, :layer_1), layer_2=KeyPath(:layer_2, :layer_2)),
+    layer_3=KeyPath(:layer_3),
+)
+
 # Prefix-matching semantics used by LayerMap (was: `Base.in` on ModelIndex)
-@test_skip keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1))
-@test_skip !keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))
+@test keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1))
+@test keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1, :layer_2))
+@test !keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))
+@test !keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_2))

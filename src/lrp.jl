@@ -61,6 +61,7 @@ end
 
 """
     LRP(model, ps, st, rules)
+    LRP(model, ps, st, composite)
     LRP(model, ps, st)
 
 Analyze a Lux model by applying Layer-Wise Relevance Propagation.
@@ -70,8 +71,9 @@ and states `st`, as returned by `Lux.setup`. Since LRP is inference-only,
 states are converted once via `Lux.testmode` at construction.
 
 Rules are assigned to layers by passing either
-- a `NamedTuple` of LRP rules mirroring the keys of `model.layers`, or
-- an `AbstractVector` of LRP rules for flat models, matched positionally.
+- a `NamedTuple` of LRP rules mirroring the keys of `model.layers`,
+- an `AbstractVector` of LRP rules for flat models, matched positionally, or
+- a [`Composite`](@ref), which assigns rules based on layer type and position.
 If no rules are passed, [`ZeroRule`](@ref) is used on all layers.
 
 # Keyword arguments
@@ -134,6 +136,11 @@ function LRP(model::Chain, ps, st, rules::AbstractVector; kwargs...)
         )
     end
     return LRP(model, ps, st, NamedTuple{layer_keys}(Tuple(rules)); kwargs...)
+end
+
+# Construct the NamedTuple of rules by applying a composite
+function LRP(model::Chain, ps, st, c::Composite; kwargs...)
+    return LRP(model, ps, st, lrp_rules(model, c); kwargs...)
 end
 
 # Convenience constructor without rules: use ZeroRule everywhere
