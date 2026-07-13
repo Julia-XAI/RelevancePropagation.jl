@@ -1,7 +1,7 @@
 name = "RelevancePropagation"
 uuid = "0be6dd02-ae9e-43eb-b318-c6e81d6890d8"
 authors = ["Adrian Hill <gh@adrianhill.de>"]
-version = "4.0.0-DEV"
+version = "4.0.0"
 
 [deps]
 ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
