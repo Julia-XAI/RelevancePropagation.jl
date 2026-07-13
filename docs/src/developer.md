@@ -89,22 +89,37 @@ The vector $c$ computed in step 3 corresponds to $c = s^T W$,
 a so-called *Vector-Jacobian-Product* (VJP) of the vector $s$ with the Jacobian $W$. 
 
 VJPs are the fundamental building blocks of reverse-mode automatic differentiation (AD),
-and therefore implemented by most AD frameworks in a highly performant, matrix-free, GPU-accelerated manner.
+and therefore implemented by most AD frameworks in a highly performant, matrix-free manner.
 Note that computing the VJP is much more efficient than first computing the full Jacobian
 $W$ and later multiplying it with $s$. 
 This is due to the fact that computing the full Jacobian of a function 
 $f: \mathbb{R}^n \rightarrow \mathbb{R}^m$ requires computing $m$ VJPs.
 
-Functions that compute VJP's are commonly called *pullbacks*.
-Using the [Zygote.jl](https://github.com/FluxML/Zygote.jl) AD system,
-we obtain the output $z$ of a modified layer and its pullback `back` in a single function call:
+RelevancePropagation.jl computes VJPs using [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl).
+All Enzyme-specific code is contained in the file
+[`/src/autodiff.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/autodiff.jl),
+which implements the internal helper function `layer_pullback`.
+It returns the output $z$ of a layer alongside a function `back`,
+commonly called a *pullback*, that computes the VJP for a given seed $s$:
 
 ```julia
-z, back = pullback(modified_layer, aᵏ)
-```
-We then call the pullback with the vector $s$ to obtain $c$:
-```julia
+z, back = layer_pullback(modified_layer, aᵏ)
 c = back(s)
+```
+
+Enzyme's *split mode* is used to separate the forward pass (computing $z$)
+from the reverse pass (computing the VJP),
+since the seed $s$ depends on the primal output $z$ (step 2).
+One consequence of this design is that `back` may be called *at most once*
+per call to `layer_pullback`:
+Enzyme's reverse pass consumes the recording (the "tape") of the forward pass.
+Rules that require several VJPs with different seeds through the same layer,
+like [`AlphaBetaRule`](@ref), use the internal helper `layer_pullback_2seeds`,
+which evaluates two seeds in a single forward and reverse pass.
+
+```@docs
+RelevancePropagation.layer_pullback
+RelevancePropagation.layer_pullback_2seeds
 ```
 
 **Finally, step 4** consists of an element-wise multiplication of the vector $c$ 
@@ -119,23 +134,25 @@ For more background information on automatic differentiation, refer to the
 [JuML lecture on AD](https://adrianhill.de/julia-ml-course/L6_Automatic_Differentiation/).
 
 ## LRP analyzer struct
-The [`LRP`](@ref) analyzer struct holds three fields:
-the `model` to analyze, the LRP `rules` to use, and pre-allocated `modified_layers`.
+The [`LRP`](@ref) analyzer struct holds the Lux triple of
+`model`, parameters `ps` and states `st`,
+as well as the LRP `rules`, the model's `layers`, and pre-computed `modified_layers`.
+
+Since Lux separates a model from its parameters and states,
+layers are bundled into an internal wrapper type called `FrozenLayer`
+that holds a layer together with its `ps` and `st`.
+Calling a `FrozenLayer` applies the layer to an input,
+discarding the updated layer states — LRP is inference-only.
+
+```@docs
+RelevancePropagation.FrozenLayer
+```
 
 As described in the section on [*Composites*](@ref composites),
-applying a composite to a model will return LRP rules in nested
-[`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref)s.
-These wrapper types are used to match the structure of Flux models with `Chain`, 
-`Parallel` and `SkipConnection` layers while avoiding type piracy.
+`rules`, `layers` and `modified_layers` are `NamedTuple`s
+mirroring the structure of the model —
+the same structure Lux uses for `ps` and `st`.
 
-When creating an `LRP` analyzer with the default keyword argument `flatten=true`, 
-`flatten_model` is called on the model and rules.
-This is done for performance reasons, as discussed in 
-[*Flattening the model*](@ref flatten-model).
-
-After passing the [*Model checks*](@ref model-checks),
-modified layers are pre-allocated, once again using the `ChainTuple`, `ParallelTuple` 
-and `SkipConnectionTuple` wrapper types to match the structure of the model.
 If a rule doesn't modify a layer, 
 the corresponding entry in `modified_layers` is set to `nothing`, 
 avoiding unnecessary allocations. 
@@ -160,7 +177,7 @@ We can now run the reverse pass, iterating backwards over the layers in the mode
 and writing relevances $R^k$ into the pre-allocated array `Rs`:
 
 ```julia
-for k in length(model):-1:1
+for k in length(layers):-1:1
     #                  └─ loop over layers in reverse
     lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k+1])
     #    └─ Rᵏ: modified in-place                        └─ aᵏ  └─ Rᵏ⁺¹
@@ -191,19 +208,20 @@ in this case the first argument `Rs[k]`, which corresponds to $R^k$.
 ### Rule calls
 As discussed in [*The AD fallback*](@ref fallback),
 the default LRP fallback for unknown layers uses AD via 
-[Zygote](https://github.com/FluxML/Zygote.jl).
+[Enzyme](https://github.com/EnzymeAD/Enzyme.jl).
 Now that you are familiar with both the API and the four-step computation of the generic LRP rules,
-the following implementation should be straightforward to understand:
+the following implementation — the actual generic rule from `src/rules.jl` —
+should be straightforward to understand:
 
 ```julia
-function lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
-   # Use modified_layer if available
-   layer = isnothing(modified_layer) ? layer : modified_layer
-
-   ãᵏ = modify_input(rule, aᵏ)
-   z, back = pullback(modified_layer, ãᵏ)
-   s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
-   Rᵏ .= ãᵏ .* only(back(s))
+function lrp!(Rᵏ, rule::AbstractLRPRule, layer::FrozenLayer, modified_layer, aᵏ, Rᵏ⁺¹)
+    layer = isnothing(modified_layer) ? layer : modified_layer
+    ãᵏ = modify_input(rule, aᵏ)
+    z, back = layer_pullback(layer, ãᵏ)
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
+    c = back(s)
+    Rᵏ .= ãᵏ .* c
+    return Rᵏ
 end
 ```
 
@@ -212,7 +230,7 @@ but also the internal functions `modify_input` and `modify_denominator`.
 Unknown layers that are registered in the `LRP_CONFIG` use this exact function.
 
 All LRP rules are implemented in the file
-[`/src/rules.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/master/src/rules.jl).
+[`/src/rules.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/rules.jl).
 
 ### Specialized implementations
 In other programming languages, LRP is commonly implemented in an object-oriented manner,
@@ -226,37 +244,32 @@ for example for fully connected layers or reshaping layers.
 Reshaping layers don't affect attributions. We can therefore avoid the computational
 overhead of AD by writing a specialized implementation that simply reshapes back:
 ```julia
-function lrp!(Rᵏ, rule, layer::ReshapingLayer, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule, layer::FrozenLayer{<:ReshapingLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
     Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
 end
 ```
 
-We can even provide a specialized implementation of the generic LRP rule for `Dense` layers. Since we can access the weight matrix directly, we can skip the use of automatic differentiation
-and implement the following equation directly, using Einstein summation notation:
-
-```math
-R_j^k = \sum_i \frac{\rho(W_{ij}) \; a_j^k}{\epsilon + \sum_{l} \rho(W_{il}) \; a_l^k + \rho(b_i)} R_i^{k+1}
-```
+We can even provide a specialized implementation of the generic LRP rule for `Dense` layers.
+Since we can access the weight matrix in the layer's parameters directly,
+we can skip automatic differentiation and compute the VJP $c = W^T s$
+using a plain matrix-vector product:
 
 ```julia
-function lrp!(Rᵏ, rule, layer::Dense, modified_layer, aᵏ, Rᵏ⁺¹)
-   # Use modified_layer if available
-   layer = isnothing(modified_layer) ? layer : modified_layer
+function lrp!(Rᵏ, rule, layer::FrozenLayer{<:Dense}, modified_layer, aᵏ, Rᵏ⁺¹)
+    # Use modified_layer if available
+    layer = isnothing(modified_layer) ? layer : modified_layer
 
-   ãᵏ = modify_input(rule, aᵏ)
-   z = modify_denominator(rule, layer(ãᵏ))
-
-   # Implement LRP using Einsum notation, where `b` is the batch index
-   @tullio Rᵏ[j, b] = layer.weight[i, j] * ãᵏ[j, b] / z[i, b] * Rᵏ⁺¹[i, b]
+    ãᵏ = modify_input(rule, aᵏ)
+    z = modify_denominator(rule, layer(ãᵏ))
+    Rᵏ .= ãᵏ .* (layer.ps.weight' * (Rᵏ⁺¹ ./ z))
 end
 ```
-
 
 For maximum low-level control beyond `modify_input` and `modify_denominator`,
 you can also implement your own `lrp!` function and dispatch
 on individual rule types `MyRule` and layer types `MyLayer`:
 ```julia
-function lrp!(Rᵏ, rule::MyRule, layer::MyLayer, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::MyRule, layer::FrozenLayer{<:MyLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
     Rᵏ .= ...
 end
 ```

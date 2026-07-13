@@ -60,7 +60,7 @@ FirstLayerMap
 LastLayerMap
 ```
 
-To apply `LayerMap` to nested Flux Chains or `Parallel` layers, 
+To apply `LayerMap` to nested Chains or `Parallel` layers, 
 make use of `show_layer_indices`:
 ```@docs
 show_layer_indices
@@ -93,15 +93,6 @@ EpsilonPlus
 EpsilonAlpha2Beta1
 EpsilonPlusFlat
 EpsilonAlpha2Beta1Flat
-```
-
-### Manual rule assignment
-For [manual rule assignment](@ref composites-manual), use `ChainTuple`, 
-`ParallelTuple` and `SkipConnectionTuple`, matching the model structure:
-```@docs
-ChainTuple
-ParallelTuple
-SkipConnectionTuple
 ```
 
 ## Custom rules 

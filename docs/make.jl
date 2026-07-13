@@ -47,6 +47,8 @@ makedocs(;
     linkcheck_ignore=[
         r"https://link.springer.com/chapter/10.1007/978-3-030-28954-6_10",
         r"https://www.nature.com/articles/s42256-023-00711-8",
+        # Links to source files on GitHub get rate-limited (HTTP 429):
+        r"https://github.com/Julia-XAI/RelevancePropagation.jl/blob/.*",
     ],
     warnonly=[:missing_docs],
     checkdocs=:exports, # only check docstrings in API reference if they are exported

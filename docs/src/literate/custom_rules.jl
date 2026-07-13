@@ -11,16 +11,29 @@
 # We start out by loading the same pre-trained LeNet-5 model and MNIST input data:
 using RelevancePropagation
 using VisionHeatmaps
-using Flux
+using Lux
 using MLDatasets
 using ImageCore
-using BSON
+using JLD2
+using StableRNGs: StableRNG
 
 index = 10
 x, y = MNIST(Float32, :test)[10]
 input = reshape(x, 28, 28, 1, :)
 
-model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
+model = Chain(
+    Conv((5, 5), 1 => 6, relu),
+    MaxPool((2, 2)),
+    Conv((5, 5), 6 => 16, relu),
+    MaxPool((2, 2)),
+    FlattenLayer(),
+    Dense(256 => 120, relu),
+    Dense(120 => 84, relu),
+    Dense(84 => 10),
+);
+
+ps = load("../model.jld2", "ps"); # load pre-trained parameters
+_, st = Lux.setup(StableRNG(123), model); # all layers in LeNet-5 are stateless
 
 # ## Implementing a custom rule
 # ### Step 1: Define rule struct
@@ -41,7 +54,7 @@ struct MyGammaRule <: AbstractLRPRule end
 # 1. `modify_input` doesn't change the input
 # 1. `modify_parameters` doesn't change the parameters
 # 1. `modify_denominator` avoids division by zero by adding a small epsilon-term (`1.0f-9`)
-# 1. `is_compatible` returns `true` if a layer has fields `weight` and `bias`
+# 1. `is_compatible` returns `true` if the layer's parameters `ps` have a `weight` entry
 #
 # To extend internal functions, import them explicitly:
 import RelevancePropagation: modify_parameters
@@ -63,7 +76,7 @@ rules = [
     ZeroRule(),
     ZeroRule(),
 ]
-analyzer = LRP(model, rules)
+analyzer = LRP(model, ps, st, rules)
 
 heatmap(input, analyzer) # using VisionHeatmaps.jl
 
@@ -72,33 +85,36 @@ heatmap(input, analyzer) # using VisionHeatmaps.jl
 rules = [
     ZPlusRule(),
     EpsilonRule(),
-    GammaRule(), # XAI.jl's GammaRule
+    GammaRule(), # RelevancePropagation.jl's GammaRule
     EpsilonRule(),
     ZeroRule(),
     ZeroRule(),
     ZeroRule(),
     ZeroRule(),
 ]
-analyzer = LRP(model, rules)
+analyzer = LRP(model, ps, st, rules)
 heatmap(input, analyzer)
 
 # ## Performance tips
 # 1. Make sure functions like `modify_parameters` don't promote the type of weights
 #    (e.g. from `Float32` to `Float64`).
-# 2. If your rule `MyRule` doesn't modify weights or biases,
+# 2. If your rule `MyRule` requires neither a modified layer nor the original one,
 #    defining `modify_layer(::MyRule, layer) = nothing`
-#    can provide reduce memory allocations and improve performance.
+#    can reduce memory allocations and improve performance.
 
 # ## [Advanced layer modification](@id custom-rules-advanced)
 # For more granular control over weights and biases,
 # [`modify_weight`](@ref RelevancePropagation.modify_weight) and
 # [`modify_bias`](@ref RelevancePropagation.modify_bias) can be used.
 #
-# If the layer doesn't use weights (`layer.weight`) and biases (`layer.bias`),
+# If the layer doesn't use weights (`ps.weight`) and biases (`ps.bias`),
 # RelevancePropagation provides a lower-level variant of
 # [`modify_parameters`](@ref RelevancePropagation.modify_parameters) called
 # [`modify_layer`](@ref RelevancePropagation.modify_layer).
-# This function is expected to take a layer and return a new, modified layer.
+# This function operates on a `FrozenLayer`, an internal wrapper type
+# bundling a Lux layer with its parameters and states,
+# and is expected to return a new, modified `FrozenLayer`.
+# Layers without a `weight` entry in their parameters are returned unmodified.
 # To add compatibility checks between rule and layer types, extend
 # [`is_compatible`](@ref RelevancePropagation.is_compatible).
 

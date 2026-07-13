@@ -6,7 +6,7 @@ CurrentModule = RelevancePropagation
 
 Julia implementation of [Layerwise Relevance Propagation](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130140) (LRP) 
 and [Concept Relevance Propagation](https://www.nature.com/articles/s42256-023-00711-8) (CRP) 
-for use with [Flux.jl](https://fluxml.ai) models.
+for use with [Lux.jl](https://lux.csail.mit.edu) models.
 
 !!! note
     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI).
