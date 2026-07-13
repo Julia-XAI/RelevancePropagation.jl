@@ -1,11 +1,8 @@
-# Restored from v3 and adapted to the v4 Lux port (see PLAN.md):
+# Adapted from v3:
 # - rules are NamedTuples mirroring the model's `ps`/`st` instead of ChainTuples
 # - `LayerMap` addresses layers via `Functors.KeyPath` instead of `ModelIndex`
 # - v3 used Metalhead's VGG11; rule assignment only depends on layer types and
-#   positions, so slim VGG11-shaped Lux models are used instead. (Boltz's Lux
-#   VGG arrives with the docs port in phase 7.)
-# - v3 tested composites on `flatten_model(model)`; the equivalent flat model
-#   is constructed directly here until `flatten_model` lands in phase 5.
+#   positions, so slim VGG11-shaped Lux models are used instead.
 using RelevancePropagation
 using Test
 using ReferenceTests
@@ -148,6 +145,9 @@ rules3 = lrp_rules(model, composite3)
 
 # LayerMap addresses nested layers via KeyPath (integer/tuple conveniences map
 # to Lux's default `layer_i` naming) and matches all layers below the path.
+@test LayerMap(2, EpsilonRule()) == LayerMap(KeyPath(:layer_2), EpsilonRule())
+@test LayerMap((1, 5), EpsilonRule()) ==
+    LayerMap(KeyPath(:layer_1, :layer_5), EpsilonRule())
 model4 = Chain(Dense(2 => 2), Chain(Dense(2 => 2), Dense(2 => 2)), Dense(2 => 2))
 composite4 = Composite(
     LayerMap((2, 1), EpsilonRule()), LayerMap(KeyPath(:layer_3), GammaRule())
@@ -172,42 +172,37 @@ composite6 = Composite(
 )
 @test lrp_rules(model6, composite6) == (; layer_1=EpsilonRule(), layer_2=PassRule())
 
-# Show reference tests require show.jl and the default composites from
-# composite_presets.jl, which land later in phase 4 (see PLAN.md).
-if !isdefined(RelevancePropagation, :EpsilonGammaBox)
-    @test_skip false
-else
-    DEFAULT_COMPOSITES = Dict(
-        "EpsilonGammaBox"        => EpsilonGammaBox(-3.0f0, 3.0f0),
-        "EpsilonPlus"            => EpsilonPlus(),
-        "EpsilonAlpha2Beta1"     => EpsilonAlpha2Beta1(),
-        "EpsilonPlusFlat"        => EpsilonPlusFlat(),
-        "EpsilonAlpha2Beta1Flat" => EpsilonAlpha2Beta1Flat(),
-    )
-    for (name, c) in DEFAULT_COMPOSITES
-        @test_reference "references/show/$name.txt" repr("text/plain", c)
-    end
-
-    @test_reference "references/show/show_layer_indices.txt" repr(
-        "text/plain", show_layer_indices(model)
-    )
-
-    @test_reference "references/show/composite1.txt" repr("text/plain", composite1)
-    @test_reference "references/show/composite2.txt" repr("text/plain", composite2)
-
-    # Analyzer show tests on the slim VGG11 models
-    ps_flat, st_flat = Lux.setup(StableRNG(123), model_flat)
-    analyzer1 = LRP(model_flat, ps_flat, st_flat, composite1)
-    @test analyzer1.rules == rules1
-    @test_reference "references/show/lrp1.txt" repr("text/plain", analyzer1)
-
-    ps2, st2 = Lux.setup(StableRNG(123), model2)
-    analyzer2 = LRP(model2, ps2, st2, composite2)
-    @test analyzer2.rules == rules2
-    @test_reference "references/show/lrp2.txt" repr("text/plain", analyzer2)
-
-    ps, st = Lux.setup(StableRNG(123), model)
-    analyzer3 = LRP(model, ps, st, composite3)
-    @test analyzer3.rules == rules3
-    @test_reference "references/show/lrp3.txt" repr("text/plain", analyzer3)
+# Show reference tests
+DEFAULT_COMPOSITES = Dict(
+    "EpsilonGammaBox"        => EpsilonGammaBox(-3.0f0, 3.0f0),
+    "EpsilonPlus"            => EpsilonPlus(),
+    "EpsilonAlpha2Beta1"     => EpsilonAlpha2Beta1(),
+    "EpsilonPlusFlat"        => EpsilonPlusFlat(),
+    "EpsilonAlpha2Beta1Flat" => EpsilonAlpha2Beta1Flat(),
+)
+for (name, c) in DEFAULT_COMPOSITES
+    @test_reference "references/show/$name.txt" repr("text/plain", c)
 end
+
+@test_reference "references/show/show_layer_indices.txt" repr(
+    "text/plain", show_layer_indices(model)
+)
+
+@test_reference "references/show/composite1.txt" repr("text/plain", composite1)
+@test_reference "references/show/composite2.txt" repr("text/plain", composite2)
+
+# Analyzer show tests on the slim VGG11 models
+ps_flat, st_flat = Lux.setup(StableRNG(123), model_flat)
+analyzer1 = LRP(model_flat, ps_flat, st_flat, composite1)
+@test analyzer1.rules == rules1
+@test_reference "references/show/lrp1.txt" repr("text/plain", analyzer1)
+
+ps2, st2 = Lux.setup(StableRNG(123), model2)
+analyzer2 = LRP(model2, ps2, st2, composite2)
+@test analyzer2.rules == rules2
+@test_reference "references/show/lrp2.txt" repr("text/plain", analyzer2)
+
+ps, st = Lux.setup(StableRNG(123), model)
+analyzer3 = LRP(model, ps, st, composite3)
+@test analyzer3.rules == rules3
+@test_reference "references/show/lrp3.txt" repr("text/plain", analyzer3)

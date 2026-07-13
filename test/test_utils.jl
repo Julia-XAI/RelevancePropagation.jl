@@ -92,12 +92,6 @@ mask = Matrix{Bool}([0  1  1; 0  1  0; 1  1  1])
 mc   = @inferred masked_copy(A, mask)
 @test mc == [0  9  9; 0  6  0; 1  7  8]
 
-#=============================================================================#
-# The tests below are restored from v3 (Flux/Zygote) and adapted to Lux.     #
-# They cover model utilities that are not ported yet and are skipped until   #
-# their port lands (phase 5, see PLAN.md).                                   #
-#=============================================================================#
-
 # flatten_model: a joint transformation of (model, ps, st),
 # since flattening nested Chains re-keys `ps` and `st`.
 flat_triple(model) = flatten_model(model, Lux.setup(StableRNG(123), model)...)

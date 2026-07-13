@@ -1,6 +1,5 @@
-# Restored from v3 and adapted to the v4 Lux port (see PLAN.md):
-# v3's ChainTuple/ParallelTuple/SkipConnectionTuple machinery (chain_utils.jl)
-# is replaced by NamedTuples mirroring the Lux `ps`/`st` structure.
+# v3's ChainTuple/ParallelTuple/SkipConnectionTuple machinery is replaced by
+# NamedTuples mirroring the Lux `ps`/`st` structure.
 # - `chainmap`  → `map_layers`, returning nested NamedTuples keyed like `ps`
 # - `chainzip`  → zipping NamedTuples along the model tree; its user-facing
 #   behavior (rules zipped over layers, key-mismatch errors) is covered in
