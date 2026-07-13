@@ -31,6 +31,7 @@ using Statistics: mean, var
 include("bibliography.jl")
 include("autodiff.jl")
 include("layer_types.jl")
+include("chain_utils.jl")
 include("layer_utils.jl")
 include("utils.jl")
 include("checks.jl")

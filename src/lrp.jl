@@ -2,32 +2,6 @@
 # Structure helpers #
 #===================#
 
-"""
-    map_layers(f, model)
-
-Apply `f` to each layer of a Lux model, mirroring the model structure
-as nested `NamedTuple`s keyed like the model's `ps` and `st`.
-"""
-function map_layers(f, model::Union{Chain,Parallel})
-    layers = model.layers
-    return NamedTuple{keys(layers)}(map(l -> map_layers(f, l), values(layers)))
-end
-map_layers(f, model::SkipConnection) = map_layers(f, model.layers)
-map_layers(f, layer) = f(layer)
-
-# `Chain` and `Parallel` store their children in a `layers` NamedTuple
-# that `ps` and `st` mirror.
-function frozen_children(f::FrozenLayer{<:Union{Chain,Parallel}})
-    layers = f.layer.layers
-    return NamedTuple{keys(layers)}(
-        map(FrozenLayer, values(layers), values(f.ps), values(f.st))
-    )
-end
-
-# `SkipConnection` is an `AbstractLuxWrapperLayer`:
-# its `ps`/`st` pass through to the wrapped layer directly.
-frozen_inner(f::FrozenLayer{<:SkipConnection}) = FrozenLayer(f.layer.layers, f.ps, f.st)
-
 # Construct the NamedTuple of modified layers by zipping rules and layers
 # along the model structure.
 function get_modified_layers(
@@ -93,8 +67,12 @@ struct LRP{M<:Chain,P,S,R<:NamedTuple,L<:NamedTuple,ML<:NamedTuple} <: AbstractX
     ps::P
     st::S
     rules::R
-    layers::L            # FrozenLayers mirroring model.layers
-    modified_layers::ML  # rule-modified FrozenLayers, mirroring model.layers
+    # `lrp!` needs both the original layer (for the forward pass and for rules
+    # that differentiate through the unmodified layer) and its pre-computed
+    # rule-modified counterpart, whose entries can also be `nothing` or a
+    # NamedTuple of variants. Both mirror the keys of `model.layers`.
+    layers::L
+    modified_layers::ML
     normalize_output_relevance::Bool
 
     function LRP(
@@ -165,16 +143,6 @@ function call_analyzer(
     return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
 end
 
-# Compute activations of all layers, including the input.
-# Returns a tuple `(input, a¹, a², ..., aᴺ)` of length `length(layers) + 1`.
-get_activations(layers::NamedTuple, input) = (input, _activations(values(layers), input)...)
-
-function _activations(layers::Tuple, x)
-    isempty(layers) && return ()
-    y = first(layers)(x)
-    return (y, _activations(Base.tail(layers), y)...)
-end
-
 function mask_output_neuron!(
     R_out, a_out, ns::AbstractOutputSelector, normalize_output_relevance::Bool
 )
@@ -236,7 +204,7 @@ function lrp!(
     Rᵏ⁺¹s = map(aᵏ⁺¹ -> c .* aᵏ⁺¹, aᵏ⁺¹s)
 
     # Compute individual input relevances Rᵏ for all branches of the parallel layer
-    Rᵏs = map(_ -> similar(aᵏ), aᵏ⁺¹s)
+    Rᵏs = [similar(aᵏ) for _ in aᵏ⁺¹s] # pre-allocate output
     for (Rᵏᵢ, rule, child, modified_child, Rᵏ⁺¹ᵢ) in
         zip(Rᵏs, values(rules), values(children), values(modified_parallel), Rᵏ⁺¹s)
         # In-place update Rᵏᵢ and therefore Rᵏs
