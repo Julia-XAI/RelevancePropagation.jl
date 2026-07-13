@@ -1,7 +1,8 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** Phases 1–6 complete; Phase 7 (tests,
-docs, release) next — see HANDOFF.md.
+**Branch:** `ah/enzyme` · **Status:** Phases 1–6 complete; Phase 7 partially
+done (tests, linting, benchmarks green — TTFX, docs, release remain) — see
+HANDOFF.md.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
 simplifying the codebase along the way.
@@ -266,16 +267,29 @@ Design points:
       assumption now documented in the `CRP` docstring.
 
 ### Phase 7 — Tests, docs, release
-- [ ] Port test models to Lux (StableRNG via `Lux.setup`); regenerate JLD2
+- [x] Port test models to Lux (StableRNG via `Lux.setup`); regenerate JLD2
       references.
+      CNN/batch tests use the explicit `flatten_model` triple in place of
+      v3's `flatten` kwarg; conservation checks loosened to `atol=0.15`
+      (bias absorbs relevance, amount depends on the parameter draw).
 - [x] Zygote-vs-Enzyme consistency testset for `layer_pullback` (Zygote test-only dep).
       Landed with phase 2 (`test/test_autodiff.jl`, additive-first ordering).
-- [ ] Keep Aqua, ExplicitImports, JuliaFormatter tests.
-- [ ] Port PkgJogger benchmarks; measure shadow/thunk preallocation (remember
+- [x] Keep Aqua, ExplicitImports, JuliaFormatter tests.
+      JET restored on top (user directive); `static` now imported from its
+      owner Static.jl (new direct dep) to satisfy ExplicitImports.
+- [x] Port PkgJogger benchmarks; measure shadow/thunk preallocation (remember
       `make_zero!` on reused shadows; thunk cache is per input type, first-call).
+      PkgJogger 0.6.0's `@test_benchmarks` is broken with BenchmarkTools ≥ 1.6;
+      test_benchmarks.jl runs each collected benchmark via the public API.
 - [ ] TTFX measurement: first-`analyze` latency on a VGG-scale composite,
-      before/after comparison against v3.
+      before/after comparison against v3. **Measured** (VGG16 cold analyze:
+      v3 9.2 s on Julia 1.11 vs v4 32.3 s on 1.12; table in HANDOFF.md) —
+      NOTES.md write-up pending.
+- [ ] `flatten_model` unwraps generic `AbstractLuxWrapperLayer`s (needed for
+      the Boltz VGG docs example; design verified, see HANDOFF.md).
 - [ ] Rewrite Literate docs with Lux; VGG composites example via Boltz.jl; README.
+      Groundwork done: pre-trained LeNet-5 converted BSON → Lux-`ps` JLD2
+      (bit-exact), Boltz VGG structure verified.
 - [ ] Remove stale Tullio/LoopVectorization doc content: `basics.jl` advertises a
       Tullio/LV package extension that no longer exists (stale since the
       ExplainableAI.jl split); rewrite the `@tullio` custom-rule example in
