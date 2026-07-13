@@ -443,20 +443,22 @@ function lrp!(Rᵏ, rule::AlphaBetaRule, layer::FrozenLayer, modified_layers, a�
     aᵏ⁻ = keep_negative(aᵏ)
 
     # The α- and β-variants share weights and only differ in their biases,
-    # so their VJPs agree and each pullback is reused for both seeds.
-    # A width-2 pullback computes both VJPs in one forward and reverse pass;
-    # this is safe because AlphaBetaRule is restricted to weight-bias layers
-    # (width-2 thunks crash Enzyme on pooling/normalization layers).
-    zᵅ⁺, back2⁺ = layer_pullback_2seeds(modified_layers.layerᵅ⁺, aᵏ⁺)
-    zᵅ⁻, back2⁻ = layer_pullback_2seeds(modified_layers.layerᵅ⁻, aᵏ⁻)
+    # so their VJPs agree and both seeds are pulled back through the
+    # α-variants. Each pullback is single-use, so one is built per seed.
+    zᵅ⁺, backᵅ⁺ = layer_pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
+    zᵅ⁻, backᵅ⁻ = layer_pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
+    _, backᵝ⁺ = layer_pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
+    _, backᵝ⁻ = layer_pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
     # No need to linearize again: Wᵝ⁺ = Wᵅ⁺ and Wᵝ⁻ = Wᵅ⁻
     zᵝ⁺ = modified_layers.layerᵝ⁺(aᵏ⁻)
     zᵝ⁻ = modified_layers.layerᵝ⁻(aᵏ⁺)
 
     sᵅ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵅ⁺ + zᵅ⁻)
     sᵝ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵝ⁺ + zᵝ⁻)
-    cᵅ⁺, cᵝ⁺ = back2⁺(sᵅ, sᵝ)
-    cᵅ⁻, cᵝ⁻ = back2⁻(sᵅ, sᵝ)
+    cᵅ⁺ = backᵅ⁺(sᵅ)
+    cᵅ⁻ = backᵅ⁻(sᵅ)
+    cᵝ⁺ = backᵝ⁺(sᵝ)
+    cᵝ⁻ = backᵝ⁻(sᵝ)
 
     T = eltype(aᵏ)
     α = convert(T, rule.α)
@@ -508,10 +510,12 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_lay
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
-    # Width-2 pullbacks as in AlphaBetaRule: the ˡ/ʳ-variants share weights,
-    # and GeneralizedGammaRule is restricted to weight-bias layers.
-    zˡ⁺, back2⁺ = layer_pullback_2seeds(modified_layers.layerˡ⁺, aᵏ⁺)
-    zˡ⁻, back2⁻ = layer_pullback_2seeds(modified_layers.layerˡ⁻, aᵏ⁻)
+    # As in AlphaBetaRule, the ˡ/ʳ-variants share weights, so both seeds are
+    # pulled back through the ˡ-variants, with one single-use pullback each.
+    zˡ⁺, backˡ⁺ = layer_pullback(modified_layers.layerˡ⁺, aᵏ⁺)
+    zˡ⁻, backˡ⁻ = layer_pullback(modified_layers.layerˡ⁻, aᵏ⁻)
+    _, backʳ⁺ = layer_pullback(modified_layers.layerˡ⁺, aᵏ⁺)
+    _, backʳ⁻ = layer_pullback(modified_layers.layerˡ⁻, aᵏ⁻)
     # No need to linearize again: Wˡ⁺ = Wʳ⁺ and Wˡ⁻ = Wʳ⁻
     zʳ⁺ = modified_layers.layerʳ⁺(aᵏ⁻)
     zʳ⁻ = modified_layers.layerʳ⁻(aᵏ⁺)
@@ -520,8 +524,10 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_lay
 
     sˡ = masked_copy(Rᵏ⁺¹, z .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
     sʳ = masked_copy(Rᵏ⁺¹, z .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
-    cˡ⁺, cʳ⁺ = back2⁺(sˡ, sʳ)
-    cˡ⁻, cʳ⁻ = back2⁻(sˡ, sʳ)
+    cˡ⁺ = backˡ⁺(sˡ)
+    cˡ⁻ = backˡ⁻(sˡ)
+    cʳ⁺ = backʳ⁺(sʳ)
+    cʳ⁻ = backʳ⁻(sʳ)
     @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
 end
 

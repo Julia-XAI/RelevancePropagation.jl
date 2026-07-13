@@ -16,8 +16,8 @@ using Lux: FlattenLayer, ReshapeLayer, NoOpLayer, WrappedFunction
 using Lux: apply, testmode
 using LuxCore: AbstractLuxWrapperLayer
 
-using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
-using Enzyme: Const, Duplicated, BatchDuplicated, make_zero
+using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
+using Enzyme: Const, Duplicated, make_zero
 
 using ConstructionBase: setproperties
 using Static: static
