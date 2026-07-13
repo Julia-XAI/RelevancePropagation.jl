@@ -23,7 +23,6 @@ jobs:
         version:
           - 'lts'
           - '1'
-          # No 'pre': Enzyme support lags new Julia minor versions
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
