@@ -1,13 +1,12 @@
 # Porting notes: v3 (Flux/Zygote) → v4 (Lux/Enzyme)
 
-Differences discovered while porting, recorded for reviewers and as raw
-material for the v4.0.0 CHANGELOG. The migration plan itself lives in
-`PLAN.md`.
+Differences discovered while porting, recorded for reviewers and as
+background for the v4.0.0 CHANGELOG.
 
 ## API
 
-- The analyzer is constructed from the Lux triple:
-  `LRP(model, ps, st[, rules])` instead of `LRP(model[, rules])`.
+- The analyzer is constructed from a model together with its parameters and
+  states: `LRP(model, ps, st[, rules])` instead of `LRP(model[, rules])`.
   States are converted once via `Lux.testmode(st)` at construction
   (LRP is inference-only).
 - Rules are assigned as a `NamedTuple` mirroring the keys of `model.layers`
@@ -48,7 +47,7 @@ no-bias Flux layers; v4's rule compatibility defaults to requiring only a
 weight (`haskey(ps, :weight)`), which matches v3's *effective* behavior —
 no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 
-### Model utilities transform the Lux triple (phase 5)
+### Model utilities transform the Lux triple
 
 - `flatten_model` and `canonize` take and return `(model, ps, st)`:
   splicing nested `Chain`s and fusing BatchNorm re-key `ps`/`st` to the
@@ -96,7 +95,9 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   stays necessary (and must remap `ps`/`st` keys jointly).
 - **`BatchNorm` state lives in `st`** (`running_mean`, `running_var`,
   `training`); inference mode is `Lux.testmode(st)` on the state tree, not
-  `Flux.testmode!` on the layer.
+  `Flux.testmode!` on the layer. Under LRP, testmode `BatchNorm` is
+  differentiated like any other layer; `canonize` can fuse it into a
+  preceding linear layer.
 - **Reshaping:** `Flux.flatten`/`MLUtils.flatten` → `Lux.FlattenLayer`
   (plus `ReshapeLayer`) in the `ReshapingLayer` union.
 
@@ -107,16 +108,14 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   (`ReverseSplitWithPrimal`) so the seed can depend on the primal output,
   matching Zygote's `pullback` semantics with one true forward pass.
 - **Pullbacks are single-use.** Zygote's `back` could be re-invoked with
-  different seeds; Enzyme reverse thunks cannot re-run a consumed tape.
-  `AlphaBetaRule` and `GeneralizedGammaRule` (which seed the same pullback
-  twice in v3) were restructured onto `layer_pullback_2seeds`: one width-2
-  `BatchDuplicated` shadow evaluates both seeds in a single
-  forward+reverse pass.
-- **Width-2 thunks are restricted to weight-bias layers.** Compiling
-  width-2 thunks through pooling/normalization layers nondeterministically
-  aborts Julia with an Enzyme assertion (`AdjointGenerator.h:6478`).
-  The two rules that need two seeds only apply to weight-bias layers, so
-  the restriction costs nothing — but it must never be violated.
+  different seeds; an Enzyme reverse thunk consumes the tape recorded by
+  its forward thunk. Verified empirically: re-running a reverse thunk on an
+  already-consumed tape happens to return correct values for some layers
+  (`Dense`) but aborts the Julia process for others (`Scale`), so it must
+  never be done. Rules that need VJPs with two different seeds through the
+  same layer (`AlphaBetaRule`, `GeneralizedGammaRule`) construct one
+  single-use pullback per seed; the cost is one extra forward pass per
+  layer, and the thunk is compiled only once per layer and input type.
 - **Layers are differentiated as immutable `FrozenLayer(layer, ps, st)`
   bundles** annotated `Enzyme.Const`. `Lux.StatefulLuxLayer` was rejected:
   it mutates itself on every call, which is unsafe to annotate `Const`
@@ -131,9 +130,11 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 ## Structural code changes
 
 - `ChainTuple`/`ParallelTuple`/`SkipConnectionTuple` and
-  `chainmap`/`chainzip` (`chain_utils.jl`, ~280 lines + MacroTools) are
-  gone: rules and modified layers are stored as nested `NamedTuple`s
-  mirroring the Lux `ps` tree; `map_layers` covers the mapping use case.
+  `chainmap`/`chainzip` (~280 lines + MacroTools) are gone: rules and
+  modified layers are stored as nested `NamedTuple`s mirroring the Lux `ps`
+  tree. The generic model-walking helpers that survive (`map_layers`,
+  `chainall`, `first_element`, `last_element`, …) live in
+  `src/chain_utils.jl`, as in v3.
 - `ModelIndex` → `Functors.KeyPath` (what Lux's own `layer_map` uses) for
   `LayerMap`/`show_layer_indices`.
 - `copy_layer` is gone: rules modify `ps` NamedTuples and wrap them in new
@@ -143,44 +144,26 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   DifferentiationInterface (never added — raw Enzyme by design); added
   Lux, Enzyme, Functors, ConstructionBase. Zygote survives as a
   *test-only* dependency to cross-check `layer_pullback`.
-- CRP (phase 6) kept the v3 algorithm unchanged: the analyzer's
+- CRP kept the v3 algorithm unchanged: the analyzer's
   `rules`/`layers`/`modified_layers` NamedTuples are unpacked positionally
   with `values()` for the `k`-indexed backward loops, and activations come
   from `get_activations` on the `FrozenLayer` NamedTuple. The flat-model
   assumption (positional `layer::Int`) is now documented in the docstring.
 
-## Latency (TTFX)
+## Compilation latency
 
 Enzyme compiles one thunk per (rule-variant × layer type × input type) on
-the *first* `analyze` call, so cold-start latency grows compared to v3
-while warm calls stay comparable. Measured on a random-init VGG16
-(224×224×3×1 input, `EpsilonPlusFlat()` composite, Apple M3 Pro):
-
-| | v3 (Flux/Zygote, Julia 1.11.9) | v4 (Lux/Enzyme, Julia 1.12.6) |
-|---|---|---|
-| load package | 1.0 s | 1.2 s |
-| construct analyzer | 2.9 s | 1.4 s |
-| **first `analyze` (TTFX)** | **9.2 s** | **32.3 s** |
-| second `analyze` (warm) | 1.2 s | 1.8 s |
-
-v4 TTFX is ~3.5× v3; Enzyme thunk compilation dominates. Caveats:
-
-- The v3 baseline runs on Julia 1.11 because v3.0.0 pins Flux 0.14, which
-  crashes on Julia 1.12 (`Core.Compiler._return_type`) — the comparison is
-  not apples-to-apples across Julia versions.
-- Thunks are cached per input type (eltype + ndims): a second `analyze` on
-  a *differently-typed* input pays compilation again, but batch-size
-  changes of the same eltype/ndims do not.
+the *first* `analyze` call. On a random-init VGG16 (224×224×3×1 input,
+`EpsilonPlusFlat()` composite, Apple M3 Pro, Julia 1.12) the first
+`analyze` takes ~32 s; warm calls take ~1.8 s. Thunks are cached per input
+element type and dimensionality, so batch-size changes of the same
+eltype/ndims do not recompile.
 
 ## Test suite / reference values
 
 - **Rule-level JLD2 references from v3 stay valid**: the test layers use
   explicit `StableRNG(123)` weights injected into Lux `ps` NamedTuples,
   and Flux/Lux agree on convolution semantics and weight layout.
-- **Model-level (CNN) references need regeneration** in phase 7:
-  `Lux.setup` draws parameters in a different order than Flux's
-  initialization, even with the same seed.
-- v3 tests whose feature isn't ported yet are adapted to the Lux API and
-  kept as `@test_skip`/`@test_broken`, guarded on
-  `isdefined(RelevancePropagation, :SymbolName)` where possible so they
-  activate automatically when the port lands (never deleted).
+- **Model-level (CNN) references were regenerated**: `Lux.setup` draws
+  parameters in a different order than Flux's initialization, even with
+  the same seed.

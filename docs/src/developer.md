@@ -110,16 +110,13 @@ c = back(s)
 Enzyme's *split mode* is used to separate the forward pass (computing $z$)
 from the reverse pass (computing the VJP),
 since the seed $s$ depends on the primal output $z$ (step 2).
-One consequence of this design is that `back` may be called *at most once*
-per call to `layer_pullback`:
-Enzyme's reverse pass consumes the recording (the "tape") of the forward pass.
+Enzyme's reverse pass consumes the recording (the "tape") of the forward pass,
+so `back` may be called at most once per call to `layer_pullback`.
 Rules that require several VJPs with different seeds through the same layer,
-like [`AlphaBetaRule`](@ref), use the internal helper `layer_pullback_2seeds`,
-which evaluates two seeds in a single forward and reverse pass.
+like [`AlphaBetaRule`](@ref), construct one pullback per seed.
 
 ```@docs
 RelevancePropagation.layer_pullback
-RelevancePropagation.layer_pullback_2seeds
 ```
 
 **Finally, step 4** consists of an element-wise multiplication of the vector $c$ 
@@ -141,8 +138,8 @@ as well as the LRP `rules`, the model's `layers`, and pre-computed `modified_lay
 Since Lux separates a model from its parameters and states,
 layers are bundled into an internal wrapper type called `FrozenLayer`
 that holds a layer together with its `ps` and `st`.
-Calling a `FrozenLayer` applies the layer to an input,
-discarding the updated layer states — LRP is inference-only.
+Calling a `FrozenLayer` applies the layer to an input
+and discards the updated layer states, since LRP is inference-only.
 
 ```@docs
 RelevancePropagation.FrozenLayer
@@ -150,8 +147,8 @@ RelevancePropagation.FrozenLayer
 
 As described in the section on [*Composites*](@ref composites),
 `rules`, `layers` and `modified_layers` are `NamedTuple`s
-mirroring the structure of the model —
-the same structure Lux uses for `ps` and `st`.
+mirroring the structure of the model.
+This is the same structure Lux uses for `ps` and `st`.
 
 If a rule doesn't modify a layer, 
 the corresponding entry in `modified_layers` is set to `nothing`, 
@@ -202,7 +199,7 @@ and the output relevance `Rᵏ⁺¹`.
 
 The exclamation point in the function name `lrp!` is a 
 [naming convention](https://docs.julialang.org/en/v1/manual/style-guide/#bang-convention)
-in Julia to denote functions that modify their arguments -- 
+in Julia to denote functions that modify their arguments,
 in this case the first argument `Rs[k]`, which corresponds to $R^k$.
 
 ### Rule calls
@@ -210,7 +207,7 @@ As discussed in [*The AD fallback*](@ref fallback),
 the default LRP fallback for unknown layers uses AD via 
 [Enzyme](https://github.com/EnzymeAD/Enzyme.jl).
 Now that you are familiar with both the API and the four-step computation of the generic LRP rules,
-the following implementation — the actual generic rule from `src/rules.jl` —
+the following implementation, which is the actual generic rule from `src/rules.jl`,
 should be straightforward to understand:
 
 ```julia

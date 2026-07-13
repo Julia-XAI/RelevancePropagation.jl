@@ -44,7 +44,7 @@ ps, st = Lux.setup(StableRNG(123), model);
 #   ReLU-like activation functions.
 #
 #   If you think the missing layer should be supported by default, please submit
-#   an issue.
+#   an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
 #
 #   [...]
 #
@@ -107,7 +107,7 @@ ps, st = Lux.setup(StableRNG(123), model);
 #   ReLU-like activation functions.
 #
 #   If you think the missing layer should be supported by default, please submit
-#   an issue.
+#   an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
 #
 #   [...]
 #

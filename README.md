@@ -34,8 +34,8 @@ using Random
 
 # Load & prepare model
 model = Vision.VGG(16; pretrained=true)
-ps, st = Lux.setup(Random.Xoshiro(0), model) # pre-trained weights are loaded by setup
-model, ps, st = flatten_model(model, ps, st) # unwrap and flatten the model
+parameters, state = Lux.setup(Random.Xoshiro(0), model)          # pre-trained weights are loaded by setup
+model, parameters, state = flatten_model(model, parameters, state) # unwrap and flatten the model
 
 # Load input
 url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
@@ -50,7 +50,7 @@ input = reshape(input.data, 224, 224, 3, :)     # unpack data and add batch dime
 
 # Run XAI method
 composite = EpsilonPlusFlat()
-analyzer = LRP(model, ps, st, composite)
+analyzer = LRP(model, parameters, state, composite)
 expl = analyze(input, analyzer)  # or: expl = analyzer(input)
 heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
 ```

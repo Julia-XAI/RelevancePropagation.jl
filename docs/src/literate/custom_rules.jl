@@ -111,8 +111,8 @@ heatmap(input, analyzer)
 # RelevancePropagation provides a lower-level variant of
 # [`modify_parameters`](@ref RelevancePropagation.modify_parameters) called
 # [`modify_layer`](@ref RelevancePropagation.modify_layer).
-# This function operates on a `FrozenLayer`, an internal wrapper type
-# bundling a Lux layer with its parameters and states,
+# This function operates on a `FrozenLayer`, a wrapper type internal to
+# RelevancePropagation.jl that bundles a Lux layer with its parameters and states,
 # and is expected to return a new, modified `FrozenLayer`.
 # Layers without a `weight` entry in their parameters are returned unmodified.
 # To add compatibility checks between rule and layer types, extend

@@ -166,18 +166,5 @@ expl.extras.layerwise_relevances
 
 # Note that the layerwise relevances are only kept for layers in the outermost `Chain` of the model.
 # Since our LeNet-5 model is flat, we obtained all relevances.
-
-# ## Performance tips
-# ### Compilation latency
-# RelevancePropagation.jl computes vector-Jacobian products using
-# [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl),
-# which compiles specialized differentiation code
-# for every combination of rule, layer, and input type in the model.
-# This compilation happens on the first call to `analyze`
-# and can take a while for large models — subsequent calls are fast.
-#
-# The compiled code is cached based on the element type and dimensionality
-# of the input array, so analyzing inputs with different batch sizes
-# does not trigger recompilation.
 #
 # [^1]: G. Montavon et al., [Layer-Wise Relevance Propagation: An Overview](https://link.springer.com/chapter/10.1007/978-3-030-28954-6_10)
