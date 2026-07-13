@@ -23,7 +23,7 @@ jobs:
         version:
           - 'lts'
           - '1'
-          - 'pre'
+          # No 'pre': Enzyme support lags new Julia minor versions
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
@@ -39,7 +39,7 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: Julia-XAI/ExplainableAI.jl
+          slug: Julia-XAI/RelevancePropagation.jl
 
   docs:
     name: Documentation
