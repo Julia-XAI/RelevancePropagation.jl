@@ -70,7 +70,14 @@ the transformation is joint over the Lux triple.
 
 `Parallel` and `SkipConnection` layers keep their container,
 but their branches are flattened internally.
+
+Generic `AbstractLuxWrapperLayer`s (e.g. Boltz.jl model wrappers) pass `ps`
+and `st` through to the layer they wrap; `flatten_model` unwraps them, both
+at the top level and inside `Chain`s.
 """
+function flatten_model(model::AbstractLuxWrapperLayer{field}, ps, st) where {field}
+    return flatten_model(getfield(model, field), ps, st)
+end
 function flatten_model(model::Chain, ps, st)
     layers, pss, sts = flatten_chain(model, ps, st)
     flat_model = Chain(layers...)
@@ -113,3 +120,11 @@ function flatten_layer(s::SkipConnection, ps, st)
     inner, flat_ps, flat_st = flatten_layer(s.layers, ps, st)
     return setproperties(s, (; layers=inner)), flat_ps, flat_st
 end
+# Generic wrapper layers (e.g. Boltz.jl model wrappers) pass `ps`/`st` through
+# to the layer they wrap — unwrap them so wrapped `Chain`s get spliced in.
+function flatten_layer(l::AbstractLuxWrapperLayer{field}, ps, st) where {field}
+    return flatten_layer(getfield(l, field), ps, st)
+end
+# Lux pooling layers are `AbstractLuxWrapperLayer`s around internal pooling
+# ops and must stay intact — rules and composites dispatch on `PoolingLayer`.
+flatten_layer(l::PoolingLayer, ps, st) = l, ps, st

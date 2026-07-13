@@ -14,6 +14,7 @@ using Lux:
 using Lux: Dropout, AlphaDropout, VariationalHiddenDropout
 using Lux: FlattenLayer, ReshapeLayer, NoOpLayer, WrappedFunction
 using Lux: apply, testmode
+using LuxCore: AbstractLuxWrapperLayer
 
 using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
 using Enzyme: Const, Duplicated, BatchDuplicated, make_zero

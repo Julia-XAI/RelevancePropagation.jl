@@ -8,6 +8,7 @@ using RelevancePropagation: has_output_softmax, check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 
 using Lux
+using LuxCore: AbstractLuxWrapperLayer
 using StableRNGs: StableRNG
 
 frozen_layer(layer) = FrozenLayer(layer, Lux.setup(StableRNG(123), layer)...)
@@ -127,6 +128,39 @@ let model = Chain(Chain(Dense(5 => 5), BatchNorm(5)))
     y_flat, _ = Lux.apply(flat_model, x, flat_ps, Lux.testmode(flat_st))
     @test y ≈ y_flat
 end
+
+# flatten_model unwraps generic `AbstractLuxWrapperLayer`s (the pattern used
+# by Boltz.jl model wrappers), whose `ps`/`st` pass through to the wrapped
+# layer — both at the top level and inside `Chain`s.
+struct TestWrapper{L} <: AbstractLuxWrapperLayer{:inner}
+    inner::L
+end
+
+let model = TestWrapper(
+        Chain(Dense(2 => 3, relu), Chain(Dense(3 => 2)), TestWrapper(Dense(2 => 2)))
+    )
+    ps, st = Lux.setup(StableRNG(123), model)
+    flat_model, flat_ps, flat_st = flatten_model(model, ps, st)
+    @test flat_model == Chain(Dense(2 => 3, relu), Dense(3 => 2), Dense(2 => 2))
+    @test keys(flat_ps) == (:layer_1, :layer_2, :layer_3)
+
+    x = randn(StableRNG(1), Float32, 2, 4)
+    y, _ = Lux.apply(model, x, ps, st)
+    y_flat, _ = Lux.apply(flat_model, x, flat_ps, flat_st)
+    @test y ≈ y_flat
+end
+
+# Nested wrappers unwrap recursively; wrapped `Chain`s are spliced in.
+@test first(flat_triple(TestWrapper(TestWrapper(Chain(NoOpLayer()))))) == Chain(NoOpLayer())
+@test first(flat_triple(Chain(abs, TestWrapper(Chain(sqrt, relu))))) ==
+    Chain(abs, sqrt, relu)
+
+# Lux pooling layers are `AbstractLuxWrapperLayer`s around internal pooling
+# ops and must stay intact when flattening.
+@test first(flat_triple(Chain(Chain(Conv((3, 3), 1 => 2, relu)), MaxPool((2, 2))))) ==
+    Chain(Conv((3, 3), 1 => 2, relu), MaxPool((2, 2)))
+@test first(flat_triple(Chain(GlobalMeanPool(), Chain(FlattenLayer())))) ==
+    Chain(GlobalMeanPool(), FlattenLayer())
 
 # strip_softmax: model-only in v4, `ps` stays untouched.
 # A bare output softmax is replaced by `NoOpLayer`, preserving chain length.
