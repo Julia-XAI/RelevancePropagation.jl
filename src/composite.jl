@@ -58,7 +58,13 @@ layer_indices(layer, path::KeyPath) = path
 Print layer indices of Lux models.
 This is primarily a utility to help define [`LayerMap`](@ref) primitives.
 """
-show_layer_indices(model) = layer_indices(model)
+show_layer_indices(model) = LayerIndices(layer_indices(model))
+
+# Wrapper around the nested `KeyPath` structure returned by `layer_indices`
+# (a `KeyPath` for a single layer), printed with one path per line (show.jl).
+struct LayerIndices{T<:Union{NamedTuple,KeyPath}}
+    indices::T
+end
 
 # Prefix matching: `a` is at or nested below `b`.
 # keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1))            -> true

@@ -1,1 +1,25 @@
-(layer_1 = (layer_1 = KeyPath(:layer_1, :layer_1), layer_2 = KeyPath(:layer_1, :layer_2), layer_3 = KeyPath(:layer_1, :layer_3), layer_4 = KeyPath(:layer_1, :layer_4), layer_5 = KeyPath(:layer_1, :layer_5), layer_6 = KeyPath(:layer_1, :layer_6), layer_7 = KeyPath(:layer_1, :layer_7), layer_8 = KeyPath(:layer_1, :layer_8), layer_9 = KeyPath(:layer_1, :layer_9), layer_10 = KeyPath(:layer_1, :layer_10), layer_11 = KeyPath(:layer_1, :layer_11), layer_12 = KeyPath(:layer_1, :layer_12), layer_13 = KeyPath(:layer_1, :layer_13)), layer_2 = (layer_1 = KeyPath(:layer_2, :layer_1), layer_2 = KeyPath(:layer_2, :layer_2), layer_3 = KeyPath(:layer_2, :layer_3), layer_4 = KeyPath(:layer_2, :layer_4), layer_5 = KeyPath(:layer_2, :layer_5), layer_6 = KeyPath(:layer_2, :layer_6)))
+LayerIndices(
+  (
+    KeyPath(:layer_1, :layer_1),
+    KeyPath(:layer_1, :layer_2),
+    KeyPath(:layer_1, :layer_3),
+    KeyPath(:layer_1, :layer_4),
+    KeyPath(:layer_1, :layer_5),
+    KeyPath(:layer_1, :layer_6),
+    KeyPath(:layer_1, :layer_7),
+    KeyPath(:layer_1, :layer_8),
+    KeyPath(:layer_1, :layer_9),
+    KeyPath(:layer_1, :layer_10),
+    KeyPath(:layer_1, :layer_11),
+    KeyPath(:layer_1, :layer_12),
+    KeyPath(:layer_1, :layer_13),
+  ),
+  (
+    KeyPath(:layer_2, :layer_1),
+    KeyPath(:layer_2, :layer_2),
+    KeyPath(:layer_2, :layer_3),
+    KeyPath(:layer_2, :layer_4),
+    KeyPath(:layer_2, :layer_5),
+    KeyPath(:layer_2, :layer_6),
+  ),
+)

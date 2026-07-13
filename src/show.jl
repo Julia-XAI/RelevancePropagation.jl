@@ -54,6 +54,32 @@ function print_rule(io::IO, layer, rule, indent::Int=0, npad::Int=0)
     println(io, ",")
 end
 
+#===============#
+# Layer indices #
+#===============#
+
+function Base.show(io::IO, ::MIME"text/plain", li::LayerIndices)
+    println(io, "LayerIndices(")
+    _print_indices(io, li.indices)
+    print(io, ")")
+end
+
+function _print_indices(io::IO, nt::NamedTuple)
+    for v in values(nt)
+        _print_index(io, v, 1)
+    end
+end
+_print_indices(io::IO, path::KeyPath) = _print_index(io, path, 1)
+
+function _print_index(io::IO, nt::NamedTuple, indent::Int)
+    println(io, "  "^indent, "(")
+    for v in values(nt)
+        _print_index(io, v, indent + 1)
+    end
+    println(io, "  "^indent, "),")
+end
+_print_index(io::IO, path::KeyPath, indent::Int) = println(io, "  "^indent, path, ",")
+
 #===========#
 # Composite #
 #===========#
