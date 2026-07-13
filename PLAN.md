@@ -1,7 +1,7 @@
 # Plan: Migrate RelevancePropagation.jl to Lux.jl + Enzyme.jl (v4.0.0)
 
-**Branch:** `ah/enzyme` · **Status:** Phases 1–6 complete; Phase 7 partially
-done (tests, linting, benchmarks green — TTFX, docs, release remain) — see
+**Branch:** `ah/enzyme` · **Status:** All phases complete. Port done; merging
+`ah/enzyme` and tagging/registering v4.0.0 remain (user's call) — see
 HANDOFF.md.
 
 Rewrite the package from Flux/Zygote to Lux/Enzyme as a breaking v4.0.0 release,
@@ -281,22 +281,27 @@ Design points:
       `make_zero!` on reused shadows; thunk cache is per input type, first-call).
       PkgJogger 0.6.0's `@test_benchmarks` is broken with BenchmarkTools ≥ 1.6;
       test_benchmarks.jl runs each collected benchmark via the public API.
-- [ ] TTFX measurement: first-`analyze` latency on a VGG-scale composite,
-      before/after comparison against v3. **Measured** (VGG16 cold analyze:
-      v3 9.2 s on Julia 1.11 vs v4 32.3 s on 1.12; table in HANDOFF.md) —
-      NOTES.md write-up pending.
-- [ ] `flatten_model` unwraps generic `AbstractLuxWrapperLayer`s (needed for
-      the Boltz VGG docs example; design verified, see HANDOFF.md).
-- [ ] Rewrite Literate docs with Lux; VGG composites example via Boltz.jl; README.
-      Groundwork done: pre-trained LeNet-5 converted BSON → Lux-`ps` JLD2
-      (bit-exact), Boltz VGG structure verified.
-- [ ] Remove stale Tullio/LoopVectorization doc content: `basics.jl` advertises a
-      Tullio/LV package extension that no longer exists (stale since the
-      ExplainableAI.jl split); rewrite the `@tullio` custom-rule example in
-      `developer.md` with plain broadcasting/matmul. (The package itself has no
-      Tullio/LV deps — nothing to drop from Project.toml.)
-- [ ] CHANGELOG, compat bounds (julia ≥ 1.10; pin Enzyme, decide CI matrix —
-      Enzyme lags new Julia minors), tag v4.0.0.
+- [x] TTFX measurement: first-`analyze` latency on a VGG-scale composite,
+      before/after comparison against v3. Measured (VGG16 cold analyze:
+      v3 9.2 s on Julia 1.11 vs v4 32.3 s on 1.12) and recorded in NOTES.md.
+- [x] `flatten_model` unwraps generic `AbstractLuxWrapperLayer`s (needed for
+      the Boltz VGG docs example). Caveat found during implementation: Lux
+      pooling layers are themselves `AbstractLuxWrapperLayer`s and get an
+      explicit pass-through to stay intact. LuxCore is a new direct dep.
+      Verified e2e against Boltz `Vision.VGG(16)`.
+- [x] Rewrite Literate docs with Lux; README example via Boltz.jl.
+      All five Literate examples run on Lux (LeNet-5 from converted JLD2
+      `ps`, VGG-like CNN); README shows Boltz `Vision.VGG(16;
+      pretrained=true)`. Boltz is not a docs dep — the executed examples
+      don't need it. Internal AD docstrings included in developer.md.
+- [x] Remove stale Tullio/LoopVectorization doc content: dropped the stale
+      package-extension section from `basics.jl` (replaced by an Enzyme
+      compilation-latency note); replaced the `@tullio` Dense example in
+      `developer.md` with a plain-matmul variant.
+- [x] CHANGELOG v4.0.0 entry from NOTES.md; compat bounds already set
+      (julia ≥ 1.10, Enzyme pinned); CI matrix = lts + 1 (dropped `pre` —
+      Enzyme lags new Julia minors); version bumped to 4.0.0.
+      Tagging/registration is the user's call.
 
 ## Commit strategy
 
