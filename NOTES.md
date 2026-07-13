@@ -149,6 +149,29 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   from `get_activations` on the `FrozenLayer` NamedTuple. The flat-model
   assumption (positional `layer::Int`) is now documented in the docstring.
 
+## Latency (TTFX)
+
+Enzyme compiles one thunk per (rule-variant × layer type × input type) on
+the *first* `analyze` call, so cold-start latency grows compared to v3
+while warm calls stay comparable. Measured on a random-init VGG16
+(224×224×3×1 input, `EpsilonPlusFlat()` composite, Apple M3 Pro):
+
+| | v3 (Flux/Zygote, Julia 1.11.9) | v4 (Lux/Enzyme, Julia 1.12.6) |
+|---|---|---|
+| load package | 1.0 s | 1.2 s |
+| construct analyzer | 2.9 s | 1.4 s |
+| **first `analyze` (TTFX)** | **9.2 s** | **32.3 s** |
+| second `analyze` (warm) | 1.2 s | 1.8 s |
+
+v4 TTFX is ~3.5× v3; Enzyme thunk compilation dominates. Caveats:
+
+- The v3 baseline runs on Julia 1.11 because v3.0.0 pins Flux 0.14, which
+  crashes on Julia 1.12 (`Core.Compiler._return_type`) — the comparison is
+  not apples-to-apples across Julia versions.
+- Thunks are cached per input type (eltype + ndims): a second `analyze` on
+  a *differently-typed* input pays compilation again, but batch-size
+  changes of the same eltype/ndims do not.
+
 ## Test suite / reference values
 
 - **Rule-level JLD2 references from v3 stay valid**: the test layers use
