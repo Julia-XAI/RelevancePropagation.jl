@@ -1,6 +1,6 @@
 # Plan: ModelSurgeon
 
-**Status:** planned · **Decided:** 2026-07-13
+**Status:** stage 1 landed 2026-07-13 (submodule on `ah/enzyme`) · **Decided:** 2026-07-13
 **Canonical decision record:** `../REFACTOR.md`, section "Planned: ModelSurgeon".
 
 Two stages:
@@ -152,6 +152,98 @@ stability**. Concretely:
 - Per-call helpers (if any ever land here) use tuple recursion in the lispy
   `_activations` style, not loops over heterogeneous collections.
 
+## Stage 1 outcome (landed 2026-07-13)
+
+The submodule lives in `src/ModelSurgeon/` (module file + `types.jl`,
+`layer_utils.jl`, `traverse.jl`, `flatten.jl`, `canonize.jl`, `softmax.jl`),
+included first in `RelevancePropagation.jl`. Its unit tests live in
+`test/modelsurgeon/` and import from `RelevancePropagation.ModelSurgeon`
+directly, so stage 2 moves them wholesale. How the design questions resolved:
+
+1. **`map_triple(f, model, ps, st; exclude, unwrap)` landed** as planned:
+   built on `Functors.fmap_with_path` with an owned `TripleWalk <:
+   Functors.AbstractWalk` (two methods: `Chain`/`Parallel` extend the
+   `KeyPath` per child and re-key `ps`/`st`; `AbstractLuxWrapperLayer`
+   recurses transparently and rebuilds the wrapper — which handles
+   `SkipConnection` for free). `canonize_split` is one `map_triple` call.
+   One deviation from upstream worth knowing: `layer_map` uses Functors'
+   default `IdDict` cache, which silently reuses the *first* occurrence's
+   mapped triple for tied layers (`Chain(d, d)`); `map_triple` passes
+   `cache=nothing` since `ps`/`st` entries are per-occurrence.
+2. **Leaf and unwrap policy**: `exclude(kp::KeyPath, layer)::Bool` predicate
+   arguments on `map_triple`/`flatten_model`/`canonize` (taking precedence
+   over everything), plus a second hook `unwrap(layer)::Bool` for opt-in
+   wrapper unwrapping — the default flip is done, so `Maxout`,
+   `RepeatedLayer` and the whole pooling family (incl. LP) survive
+   flattening untouched by default. RP's exported `flatten_model`/`canonize`
+   are thin policy wrappers in `src/model_surgery.jl` (shadowing, not
+   extension) that bake in `keep_pooling` — all 9 pooling wrappers stay
+   leaves even under a user-supplied `unwrap`. The LP family got a
+   non-exported `LPPoolLayer` union in RP; it is deliberately *not* part of
+   the exported `PoolingLayer` union, so rule dispatch and LRP model checks
+   are unchanged (LPPool models are rejected explicitly rather than
+   silently type-erased).
+3. **Fusion extension pair** documented on `is_fuseable` + five-argument
+   `canonize_fuse` docstrings.
+4. **`split_activation(layer, ps, st)` landed** with a generic method
+   (activation moved into `WrappedFunction(Base.Fix1(broadcast, σ))`,
+   `identity`/no activation returned unchanged) and the `LayerNorm` method
+   (affine + activation split into `Scale`); `canonize_split` applies it to
+   `LayerNorm` only, SmoothDiff's `prepare` applies it to `Dense`/`Conv`
+   (see sketch below). Consumers extend it on their own layer types.
+5. **Naming/exports**: the submodule `export`s its public API (the future
+   package surface); RP imports selectively via `using .ModelSurgeon: ...`
+   to avoid clashing with its shadowing wrappers. `first_element` was kept
+   (cheap, symmetric with `last_element`, test-covered) but still has no
+   RP `src/` call site — revisit at extraction. `flatten_model` keeps its
+   name.
+
+### SmoothDiff `prepare` sketch (the second consumer)
+
+Accumulator layers (`ReluAccumulator`, `MaxPoolAccumulator`) become Lux
+layers whose `count` buffers live in `st`, so `prepare` is a joint triple
+rewrite: one `map_triple` leaf policy plus the `flatten_model` splice.
+Unlike the Flux version, no forward pass through prefixes is needed to size
+the count buffers — they can be allocated lazily in layer state.
+
+```julia
+using RelevancePropagation.ModelSurgeon:
+    map_triple, flatten_model, split_activation, activation_fn
+
+function prepare_layer(layer, ps, st, kp)
+    σ = activation_fn(layer)
+    if layer isa Union{Dense,Conv} && σ !== identity
+        is_relu_like(σ) || error("Unsupported activation $σ")
+        # split σ(Wx+b) into linear part + activation layer …
+        split, split_ps, split_st = split_activation(layer, ps, st)
+        # … and swap the WrappedFunction activation for an accumulator
+        acc = ReluAccumulator()
+        return Chain(split[1], acc),
+            merge(split_ps, (; layer_2=NamedTuple())),
+            merge(split_st, (; layer_2=initialstates(acc)))
+    elseif layer isa WrappedFunction && is_relu_like(layer.func)
+        acc = ReluAccumulator()          # bare relu used as a layer
+        return acc, ps, initialstates(acc)
+    elseif layer isa MaxPoolLayer        # pooling is a leaf by default,
+        acc = MaxPoolAccumulator(layer)  # so it reaches `prepare_layer` whole
+        return acc, ps, initialstates(acc)
+    end
+    return layer, ps, st
+end
+
+# canonize first (BatchNorm fusion needs running stats in `st`),
+# then swap activations, then splice the split-off `Chain`s in
+function prepare(model, ps, st)
+    split = map_triple(prepare_layer, canonize(model, ps, st)...)
+    return flatten_model(split...)
+end
+```
+
+No `exclude`/`unwrap` policy is needed: the flipped defaults already keep
+pooling wrappers intact, which is exactly what `MaxPoolAccumulator` needs.
+`reset_counts!` becomes a plain `st` rewrite (e.g. `Lux.update_state`), not
+a mutating tree walk.
+
 ## API design questions (iterate here, in the submodule)
 
 1. **One traversal primitive instead of three — decided: `map_triple(f, model, ps,
@@ -237,22 +329,24 @@ Extraction notes:
 
 ## Checklist
 
-Stage 1 (submodule):
+Stage 1 (submodule) — **done 2026-07-13**, see "Stage 1 outcome":
 
-- [ ] Create the `ModelSurgeon` submodule (`src/ModelSurgeon/`), included first in
+- [x] Create the `ModelSurgeon` submodule (`src/ModelSurgeon/`), included first in
       `RelevancePropagation.jl`; move the code per the table above
-- [ ] Extract the shared triple-traversal primitive (design question 1) and rebuild
-      flatten/split/fuse on it
-- [ ] Replace the `PoolingLayer` flatten carve-out with the piracy-free leaf-policy
-      hook (design question 2); RP's pooling policy lives outside the submodule;
-      flip the wrapper-unwrap default (fixes `Maxout`/`RepeatedLayer` corruption)
-      and cover the LP pooling family
-- [ ] Relocate `frozen_children`/`frozen_inner`/`get_activations` to
+- [x] Extract the shared triple-traversal primitive (design question 1) and rebuild
+      flatten/split/fuse on it (`canonize_split` is one `map_triple` call; splice
+      and sibling-fusion keep their own recursion sharing the policy hooks)
+- [x] Replace the `PoolingLayer` flatten carve-out with the piracy-free leaf-policy
+      hook (design question 2); RP's pooling policy lives outside the submodule
+      (`src/model_surgery.jl`); flip the wrapper-unwrap default (fixes
+      `Maxout`/`RepeatedLayer` corruption) and cover the LP pooling family
+- [x] Relocate `frozen_children`/`frozen_inner`/`get_activations` to
       `src/autodiff.jl`; re-point RP's `FrozenLayer` method at the submodule's
       `activation_fn`; keep `has_weight`/`has_bias` in RP
-- [ ] RP: `using .ModelSurgeon`, exports unchanged; split `test_chain_utils.jl`
-      into submodule- and RP-targeting halves per "Tests"
-- [ ] Iterate on design questions 1–5; sketch a SmoothDiff `prepare` against it
+- [x] RP: `using .ModelSurgeon` (selective), exports unchanged; submodule tests
+      split out into `test/modelsurgeon/` (the RP-targeting halves stayed in
+      `test_utils.jl` / the new `test_layer_indices.jl`)
+- [x] Iterate on design questions 1–5; sketch a SmoothDiff `prepare` against it
 
 Stage 2 (extraction, gated on the above holding up):
 

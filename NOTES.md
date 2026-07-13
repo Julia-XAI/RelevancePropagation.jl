@@ -133,8 +133,12 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   `chainmap`/`chainzip` (~280 lines + MacroTools) are gone: rules and
   modified layers are stored as nested `NamedTuple`s mirroring the Lux `ps`
   tree. The generic model-walking helpers that survive (`map_layers`,
-  `chainall`, `first_element`, `last_element`, …) live in
-  `src/chain_utils.jl`, as in v3.
+  `chainall`, `first_element`, `last_element`, …) live in the self-contained
+  `ModelSurgeon` submodule (`src/ModelSurgeon/`) together with
+  `flatten_model`, `canonize` and `strip_softmax`; RP's exported
+  `flatten_model`/`canonize` are thin policy wrappers in
+  `src/model_surgery.jl` that keep pooling layers intact
+  (see `PLAN_MODELSURGEON.md`).
 - `ModelIndex` → `Functors.KeyPath` (what Lux's own `layer_map` uses) for
   `LayerMap`/`show_layer_indices`.
 - `copy_layer` is gone: rules modify `ps` NamedTuples and wrap them in new

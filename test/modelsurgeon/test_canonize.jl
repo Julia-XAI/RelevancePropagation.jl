@@ -1,10 +1,9 @@
-using RelevancePropagation
 using Test
 
 using Lux
 using Random: AbstractRNG
 using StableRNGs: StableRNG
-using RelevancePropagation: canonize_fuse
+using RelevancePropagation.ModelSurgeon: canonize, canonize_fuse, split_activation
 
 # Also usable as a Lux `init_*` function
 pseudorand(rng::AbstractRNG, dims...) = rand(rng, Float32, dims...)
@@ -197,3 +196,47 @@ parallel_canonized = model_canonized[3]
 @test length(model_canonized[6].layers) == 1
 @test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
     first(Lux.apply(model, x, ps, st))
+
+##==========================#
+# Test `split_activation`   #
+#===========================#
+
+# Generic split: the layer's activation is moved into a separate
+# elementwise layer; layers without one are returned unchanged.
+dense = Dense(3 => 4, gelu)
+ps, st = Lux.setup(StableRNG(123), dense)
+x = pseudorand(StableRNG(123), 3, batchsize)
+dense_split, ps_split, st_split = split_activation(dense, ps, st)
+@test dense_split isa Chain
+@test length(dense_split) == 2
+@test dense_split[1].activation == identity
+@test first(Lux.apply(dense_split, x, ps_split, st_split)) ≈
+    first(Lux.apply(dense, x, ps, st))
+
+conv = Conv((3, 3), 3 => 4, relu)
+ps, st = Lux.setup(StableRNG(123), conv)
+x = pseudorand(StableRNG(123), 10, 10, 3, batchsize)
+conv_split, ps_split, st_split = split_activation(conv, ps, st)
+@test conv_split isa Chain
+@test first(Lux.apply(conv_split, x, ps_split, st_split)) ≈
+    first(Lux.apply(conv, x, ps, st))
+
+# Layers with identity activation or none at all are returned unchanged
+dense_id = Dense(3 => 4)
+ps, st = Lux.setup(StableRNG(123), dense_id)
+@test split_activation(dense_id, ps, st) === (dense_id, ps, st)
+pool = MaxPool((2, 2))
+ps, st = Lux.setup(StableRNG(123), pool)
+@test split_activation(pool, ps, st) === (pool, ps, st)
+
+# LayerNorm splits its affine part and activation into a Scale layer
+ln = LayerNorm((5,), relu)
+ps, st = Lux.setup(StableRNG(123), ln)
+x = pseudorand(StableRNG(123), 5, batchsize)
+ln_split, ps_split, st_split = split_activation(ln, ps, st)
+@test ln_split isa Chain
+@test ln_split[1] isa LayerNorm
+@test ln_split[1].activation == identity
+@test ln_split[2] isa Scale
+@test ln_split[2].activation == relu
+@test first(Lux.apply(ln_split, x, ps_split, st_split)) ≈ first(Lux.apply(ln, x, ps, st))

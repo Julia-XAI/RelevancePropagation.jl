@@ -3,10 +3,12 @@
 #================================#
 
 """
-    canonize(model, ps, st)
+    canonize(model, ps, st; exclude, unwrap)
 
-Canonize a model by flattening it and fusing BatchNorm layers into preceding
-Dense and Conv layers with linear activation functions.
+Canonize a model by splitting fused layers ([`canonize_split`](@ref)),
+flattening it ([`flatten_model`](@ref)) and fusing BatchNorm layers into
+preceding Dense and Conv layers with linear activation functions
+([`canonize_fuse`](@ref)).
 Returns a `(model, ps, st)` triple, since fusing parameters and flattening
 re-key `ps` and `st`.
 
@@ -15,32 +17,63 @@ BatchNorm layers are fused using the running statistics in `st`
 LayerNorm layers containing an affine transformation or an activation
 function are split into a normalization-only LayerNorm followed by a
 `Scale` layer carrying both.
+
+The `exclude` and `unwrap` keyword arguments are documented in
+[`flatten_model`](@ref); excluded layers are kept intact by all three passes.
 """
-function canonize(model::Chain, ps, st)
-    return canonize_fuse(flatten_model(canonize_split(model, ps, st)...)...)
+function canonize(model, ps, st; exclude=Returns(false), unwrap=Returns(false))
+    split_model, split_ps, split_st = canonize_split(model, ps, st; exclude)
+    flat = flatten_model(split_model, split_ps, split_st; exclude, unwrap)
+    return canonize_fuse(flat...)
 end
 
 #==============#
 # Split layers #
 #==============#
 
-function canonize_split(model::Union{Chain,Parallel}, ps, st)
-    ks = keys(model.layers)
-    triples = map(k -> canonize_split(model.layers[k], ps[k], st[k]), ks)
-    layers = NamedTuple{ks}(map(first, triples))
-    split_ps = NamedTuple{ks}(map(t -> t[2], triples))
-    split_st = NamedTuple{ks}(map(t -> t[3], triples))
-    return setproperties(model, (; layers)), split_ps, split_st
-end
-function canonize_split(s::SkipConnection, ps, st)
-    # `SkipConnection` is an `AbstractLuxWrapperLayer`:
-    # its `ps`/`st` pass through to the wrapped layer directly.
-    inner, split_ps, split_st = canonize_split(s.layers, ps, st)
-    return setproperties(s, (; layers=inner)), split_ps, split_st
-end
-canonize_split(layer, ps, st) = layer, ps, st
+"""
+    canonize_split(model, ps, st; exclude)
 
-function canonize_split(l::LayerNorm, ps, st)
+Split layers that bundle several operations into separate layers, using
+[`split_activation`](@ref): currently `LayerNorm` layers with an affine
+transformation or activation function. Returns a `(model, ps, st)` triple
+whose nested `Chain`s are spliced into their parents by
+[`flatten_model`](@ref).
+"""
+function canonize_split(model, ps, st; exclude=Returns(false))
+    return map_triple(split_norm, model, ps, st; exclude)
+end
+
+split_norm(layer, ps, st, kp::KeyPath) = layer, ps, st
+split_norm(l::LayerNorm, ps, st, kp::KeyPath) = split_activation(l, ps, st)
+
+"""
+    split_activation(layer, ps, st)
+
+Split a layer into a `Chain` of the layer with its activation function
+removed, followed by a separate layer applying the activation.
+Returns a `(layer, ps, st)` triple; the nested `Chain` is spliced into its
+parent by [`flatten_model`](@ref).
+
+Layers without an activation function or with `identity` activation are
+returned unchanged. For `LayerNorm`, the affine transformation is split out
+together with the activation into a `Scale` layer, leaving a
+normalization-only `LayerNorm`.
+
+To support custom layers, add methods on your own layer types
+(this is piracy-free):
+```julia
+ModelSurgeon.split_activation(l::MyLayer, ps, st) = ...
+```
+"""
+function split_activation(layer, ps, st)
+    σ = activation_fn(layer)
+    (isnothing(σ) || σ === identity) && return layer, ps, st
+    split = Chain(remove_activation(layer), WrappedFunction(Base.Fix1(broadcast, σ)))
+    return split, (; layer_1=ps, layer_2=NamedTuple()), (; layer_1=st, layer_2=NamedTuple())
+end
+
+function split_activation(l::LayerNorm, ps, st)
     affine = haskey(ps, :scale)
     # Don't split LayerNorm if the affine part is already the identity
     !affine && l.activation === identity && return l, ps, st
@@ -55,7 +88,6 @@ function canonize_split(l::LayerNorm, ps, st)
         scale_ps = (; weight=ones(Float32, l.shape))
     end
     split = Chain(norm, scale)
-    # The nested `Chain` is spliced into its parent by `flatten_model`
     return split,
     (; layer_1=NamedTuple(), layer_2=scale_ps),
     (; layer_1=st, layer_2=NamedTuple())
@@ -65,6 +97,19 @@ end
 # Fuse layers #
 #=============#
 
+"""
+    canonize_fuse(model, ps, st)
+
+Fuse adjacent layers in all `Chain`s of a model wherever
+[`is_fuseable`](@ref) holds, using the five-argument
+`canonize_fuse(layer1, ps1, layer2, ps2, st2)` method for the fused pair.
+Returns a `(model, ps, st)` triple whose `Chain`s are re-keyed to
+`layer_1, ..., layer_N`.
+
+[`is_fuseable`](@ref) and the five-argument `canonize_fuse` form the fusion
+extension API: to add fusions beyond Dense/Conv+BatchNorm, add methods for
+your own layer types (this is piracy-free).
+"""
 function canonize_fuse(model::Chain, ps, st)
     # Recursively canonize Parallel and SkipConnection layers first
     layers, pss, sts = [], [], []
@@ -109,7 +154,12 @@ function canonize_fuse(s::SkipConnection, ps, st)
 end
 canonize_fuse(layer, ps, st) = layer, ps, st
 
-# If two layers satisfy `is_fuseable`, the five-argument `canonize_fuse` is called.
+"""
+    is_fuseable(layer1, layer2, st2)
+
+Determine whether two adjacent layers can be fused by
+[`canonize_fuse`](@ref), given the states `st2` of the second layer.
+"""
 function is_fuseable(l::Union{Dense,Conv}, bn::BatchNorm, st_bn)
     return activation_fn(l) === identity && haskey(st_bn, :running_mean)
 end

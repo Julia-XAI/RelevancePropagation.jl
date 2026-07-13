@@ -1,10 +1,11 @@
-#================#
-# Enzyme AD core #
-#================#
+#==============================#
+# FrozenLayer & Enzyme AD core #
+#==============================#
 
-# This file contains all Enzyme-specific code in the package.
-# The only AD primitive LRP requires is a vector-Jacobian product (VJP)
-# w.r.t. a layer's input — never w.r.t. its parameters.
+# This file contains `FrozenLayer` — the bundled callable Lux triple all LRP
+# rules operate on — its execution helpers, and all Enzyme-specific code in
+# the package. The only AD primitive LRP requires is a vector-Jacobian
+# product (VJP) w.r.t. a layer's input — never w.r.t. its parameters.
 
 """
     FrozenLayer(layer, ps, st)
@@ -25,6 +26,33 @@ end
 (f::FrozenLayer)(x) = first(apply(f.layer, x, f.ps, f.st))
 
 Base.show(io::IO, f::FrozenLayer) = print(io, "FrozenLayer(", f.layer, ")")
+
+# Bundle the children of a `Chain` or `Parallel` with their `ps`/`st` into a
+# NamedTuple of `FrozenLayer`s mirroring `model.layers`.
+function frozen_children(f::FrozenLayer{<:Union{Chain,Parallel}})
+    layers = f.layer.layers
+    return NamedTuple{keys(layers)}(
+        map(FrozenLayer, values(layers), values(f.ps), values(f.st))
+    )
+end
+
+# `SkipConnection` is an `AbstractLuxWrapperLayer`:
+# its `ps`/`st` pass through to the wrapped layer directly.
+frozen_inner(f::FrozenLayer{<:SkipConnection}) = FrozenLayer(f.layer.layers, f.ps, f.st)
+
+# Compute activations of all layers, including the input.
+# Returns a tuple `(input, a¹, a², ..., aᴺ)` of length `length(layers) + 1`.
+# An execution helper, not a structural rewrite: it runs on NamedTuples of
+# callable `FrozenLayer`s (or their rule-modified counterparts), sits on the
+# hot path of every `analyze` call, and relies on tuple recursion for
+# inferrability.
+get_activations(layers::NamedTuple, input) = (input, _activations(values(layers), input)...)
+
+function _activations(layers::Tuple, x)
+    isempty(layers) && return ()
+    y = first(layers)(x)
+    return (y, _activations(Base.tail(layers), y)...)
+end
 
 """
     layer_pullback(layer, x)

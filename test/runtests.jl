@@ -6,9 +6,27 @@ using Test
         @info "Testing utilities..."
         include("test_utils.jl")
     end
-    @testset "Model structure" begin
-        @info "Testing model structure helpers..."
-        include("test_chain_utils.jl")
+    @testset verbose = true "ModelSurgeon" begin
+        @info "Testing ModelSurgeon submodule..."
+        @testset "Traversal" begin
+            include("modelsurgeon/test_traverse.jl")
+        end
+        @testset "Layer utilities" begin
+            include("modelsurgeon/test_layer_utils.jl")
+        end
+        @testset "Flatten" begin
+            include("modelsurgeon/test_flatten.jl")
+        end
+        @testset "Strip softmax" begin
+            include("modelsurgeon/test_strip_softmax.jl")
+        end
+        @testset "Canonize" begin
+            include("modelsurgeon/test_canonize.jl")
+        end
+    end
+    @testset "Layer indexing" begin
+        @info "Testing layer indexing..."
+        include("test_layer_indices.jl")
     end
     @testset "Enzyme pullbacks" begin
         @info "Testing Enzyme pullbacks against Zygote..."
@@ -17,10 +35,6 @@ using Test
     @testset "Model checks" begin
         @info "Testing model checks..."
         include("test_checks.jl")
-    end
-    @testset "Canonize" begin
-        @info "Testing model canonization..."
-        include("test_canonize.jl")
     end
     @testset "LRP rules" begin
         @info "Testing LRP rules..."

@@ -1,10 +1,9 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: FrozenLayer, activation_fn, remove_activation
+using RelevancePropagation: FrozenLayer, activation_fn
 using RelevancePropagation: has_weight, has_bias
-using RelevancePropagation: chainall, first_element, last_element
-using RelevancePropagation: has_output_softmax, check_output_softmax
+using RelevancePropagation: check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
 
 using Lux
@@ -13,30 +12,9 @@ using StableRNGs: StableRNG
 
 frozen_layer(layer) = FrozenLayer(layer, Lux.setup(StableRNG(123), layer)...)
 
-# Test `activation_fn`
-@test activation_fn(Dense(5 => 2, gelu)) == gelu
-@test activation_fn(BatchNorm(5, selu)) == selu
-@test activation_fn(InstanceNorm(5, selu)) == selu
-@test activation_fn(GroupNorm(4, 2, selu)) == selu
-@test activation_fn(LayerNorm((5,), selu)) == selu
-@test activation_fn(Conv((5, 5), 3 => 2, softplus)) == softplus
-@test activation_fn(ConvTranspose((5, 5), 3 => 2, softplus)) == softplus
-# v3's CrossCor is Lux's Conv with cross_correlation=true (same layer type)
-@test activation_fn(Conv((5, 5), 3 => 2, softplus; cross_correlation=true)) == softplus
-@test activation_fn(Scale(3, relu)) == relu
-@test isnothing(activation_fn(FlattenLayer()))
-@test isnothing(activation_fn(MaxPool((2, 2))))
-@test isnothing(activation_fn(WrappedFunction(relu)))
-
-# remove_activation (replaces v3's `copy_layer`: parameters live in `ps`
-# NamedTuples now, so rule-modified copies are covered by `modify_layer`
-# tests in test_rules.jl)
-@test activation_fn(remove_activation(Dense(5 => 2, gelu))) == identity
-@test remove_activation(FlattenLayer()) == FlattenLayer()
-let l = remove_activation(Conv((3, 3), 3 => 2, relu; stride=2, pad=1))
-    @test activation_fn(l) == identity
-    @test l.stride == (2, 2) # other layer configuration is preserved
-end
+# RP extends ModelSurgeon's `activation_fn` with a `FrozenLayer` method
+@test activation_fn(frozen_layer(Dense(5 => 2, gelu))) == gelu
+@test isnothing(activation_fn(frozen_layer(MaxPool((2, 2)))))
 
 # has_weight / has_bias on FrozenLayer
 @test has_weight(frozen_layer(Dense(2 => 2)))
@@ -49,27 +27,13 @@ end
 @test !has_weight(frozen_layer(MaxPool((2, 2))))
 @test !has_weight(frozen_layer(BatchNorm(2))) # BatchNorm ps are (scale, bias)
 
-# chainall, first_element, last_element
-d = Dense(2 => 2)
-d_relu = Dense(2 => 3, relu)
-model = Chain(d, Chain(d, d_relu))
-@test chainall(l -> l isa Dense, model)
-@test !chainall(l -> activation_fn(l) == relu, model)
-@test chainall(l -> l isa Dense, Chain(d, Parallel(+, d, d), SkipConnection(d, +)))
-@test !chainall(l -> l isa Dense, Chain(d, Parallel(+, d, MaxPool((2, 2)))))
-@test first_element(model) == d
-@test last_element(model) == d_relu
-
-# has_output_softmax
-@test has_output_softmax(Chain(Dense(2 => 2), softmax)) == true
-@test has_output_softmax(Chain(Dense(2 => 2, softmax))) == true
-@test has_output_softmax(Chain(Dense(2 => 2), Chain(Chain(softmax)))) == true
-@test has_output_softmax(Chain(Dense(2 => 2, softmax), Dense(2 => 2, relu))) == false
-@test has_output_softmax(Chain(Dense(2 => 2), tanh)) == false
-
 # check_output_softmax
 @test_throws ArgumentError check_output_softmax(Chain(Dense(2 => 2), softmax))
 @test check_output_softmax(Chain(Dense(2 => 2), relu)) isa Chain
+
+# strip_softmax is re-exported from the ModelSurgeon submodule
+# (mechanics are tested in modelsurgeon/test_strip_softmax.jl)
+@test strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2), NoOpLayer())
 
 # stabilize_denom
 A = [1.0 0.0 1.0e-25; -1.0 -0.0 -1.0e-25]
@@ -92,104 +56,45 @@ mask = Matrix{Bool}([0  1  1; 0  1  0; 1  1  1])
 mc   = @inferred masked_copy(A, mask)
 @test mc == [0  9  9; 0  6  0; 1  7  8]
 
-# flatten_model: a joint transformation of (model, ps, st),
-# since flattening nested Chains re-keys `ps` and `st`.
-flat_triple(model) = flatten_model(model, Lux.setup(StableRNG(123), model)...)
-@test first(flat_triple(Chain(Chain(Chain(abs)), sqrt, Chain(relu)))) ==
-    Chain(abs, sqrt, relu)
-@test first(flat_triple(Chain(abs, sqrt, relu))) == Chain(abs, sqrt, relu)
-@test first(
-    flat_triple(
-        Chain(Chain(Parallel(+, Chain(Chain(NoOpLayer())), Chain(Chain(NoOpLayer())))))
-    ),
-) == Chain(Parallel(+, Chain(NoOpLayer()), Chain(NoOpLayer())))
-@test first(flat_triple(Chain(Chain(SkipConnection(Chain(Chain(NoOpLayer())), +))))) ==
-    Chain(SkipConnection(Chain(NoOpLayer()), +))
+#================================#
+# RP's ModelSurgeon policy       #
+#================================#
 
-# ps/st are re-keyed to the flattened layer_1..layer_N structure
-let model = Chain(Chain(Dense(5 => 5), BatchNorm(5)))
-    ps, st = Lux.setup(StableRNG(123), model)
-    flat_model, flat_ps, flat_st = flatten_model(model, ps, st)
-    @test flat_model == Chain(Dense(5 => 5), BatchNorm(5))
-    @test keys(flat_model.layers) == (:layer_1, :layer_2)
-    @test flat_ps.layer_1 == ps.layer_1.layer_1
-    @test flat_ps.layer_2 == ps.layer_1.layer_2
-    @test flat_st.layer_1 == st.layer_1.layer_1
-    @test flat_st.layer_2 == st.layer_1.layer_2
-
-    x = randn(StableRNG(1), Float32, 5, 4)
-    y, _ = Lux.apply(model, x, ps, Lux.testmode(st))
-    y_flat, _ = Lux.apply(flat_model, x, flat_ps, Lux.testmode(flat_st))
-    @test y ≈ y_flat
+# RP's exported `flatten_model` and `canonize` bake in the pooling leaf
+# policy: rules and composites dispatch on intact Lux pooling wrappers, so
+# all nine pooling types (including the LP family) stay intact — even under
+# a custom `unwrap` (mechanics are tested in modelsurgeon/test_flatten.jl).
+function flat_triple(model; kwargs...)
+    flatten_model(model, Lux.setup(StableRNG(123), model)...; kwargs...)
 end
-
-# flatten_model unwraps generic `AbstractLuxWrapperLayer`s (the pattern used
-# by Boltz.jl model wrappers), whose `ps`/`st` pass through to the wrapped
-# layer — both at the top level and inside `Chain`s.
-struct TestWrapper{L} <: AbstractLuxWrapperLayer{:inner}
-    inner::L
-end
-
-let model = TestWrapper(
-        Chain(Dense(2 => 3, relu), Chain(Dense(3 => 2)), TestWrapper(Dense(2 => 2)))
-    )
-    ps, st = Lux.setup(StableRNG(123), model)
-    flat_model, flat_ps, flat_st = flatten_model(model, ps, st)
-    @test flat_model == Chain(Dense(2 => 3, relu), Dense(3 => 2), Dense(2 => 2))
-    @test keys(flat_ps) == (:layer_1, :layer_2, :layer_3)
-
-    x = randn(StableRNG(1), Float32, 2, 4)
-    y, _ = Lux.apply(model, x, ps, st)
-    y_flat, _ = Lux.apply(flat_model, x, flat_ps, flat_st)
-    @test y ≈ y_flat
-end
-
-# Nested wrappers unwrap recursively; wrapped `Chain`s are spliced in.
-@test first(flat_triple(TestWrapper(TestWrapper(Chain(NoOpLayer()))))) == Chain(NoOpLayer())
-@test first(flat_triple(Chain(abs, TestWrapper(Chain(sqrt, relu))))) ==
-    Chain(abs, sqrt, relu)
-
-# Lux pooling layers are `AbstractLuxWrapperLayer`s around internal pooling
-# ops and must stay intact when flattening.
 @test first(flat_triple(Chain(Chain(Conv((3, 3), 1 => 2, relu)), MaxPool((2, 2))))) ==
     Chain(Conv((3, 3), 1 => 2, relu), MaxPool((2, 2)))
 @test first(flat_triple(Chain(GlobalMeanPool(), Chain(FlattenLayer())))) ==
     Chain(GlobalMeanPool(), FlattenLayer())
 
-# strip_softmax: model-only in v4, `ps` stays untouched.
-# A bare output softmax is replaced by `NoOpLayer`, preserving chain length.
-@test strip_softmax(Chain(Dense(2 => 2), softmax)) == Chain(Dense(2 => 2), NoOpLayer())
-@test strip_softmax(Chain(Dense(2 => 2, softmax))) == Chain(Dense(2 => 2, identity))
-@test strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)))) ==
-    Chain(Chain(Dense(2 => 2)), Chain(Chain(NoOpLayer())))
-@test strip_softmax(Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, softmax)))) ==
-    Chain(Dense(2 => 2, relu), Chain(Dense(2 => 2, identity)))
-# don't do anything if there is no softmax at the end
-@test strip_softmax(Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))) ==
-    Chain(Chain(Dense(2 => 2)), Chain(Chain(softmax)), Dense(2 => 2))
-@test strip_softmax(Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))) ==
-    Chain(Dense(2 => 2, softmax), Chain(Dense(2 => 2, relu)))
-# Ignore output softmax if in Parallel or SkipConnection dataflow layer
-# (unlike `Chain`, they require explicit `WrappedFunction` wrapping)
-@test strip_softmax(
-    Chain(
-        Dense(2 => 2, softmax),
-        Chain(Dense(2 => 2, relu)),
-        Parallel(+, WrappedFunction(softmax), WrappedFunction(softmax)),
-    ),
-) == Chain(
-    Dense(2 => 2, softmax),
-    Chain(Dense(2 => 2, relu)),
-    Parallel(+, WrappedFunction(softmax), WrappedFunction(softmax)),
-)
-@test strip_softmax(
-    Chain(
-        Dense(2 => 2, softmax),
-        Chain(Dense(2 => 2, relu)),
-        SkipConnection(WrappedFunction(softmax), +),
-    ),
-) == Chain(
-    Dense(2 => 2, softmax),
-    Chain(Dense(2 => 2, relu)),
-    SkipConnection(WrappedFunction(softmax), +),
-)
+struct TestWrapper{L} <: AbstractLuxWrapperLayer{:inner}
+    inner::L
+end
+
+let model = Chain(
+        TestWrapper(Chain(Conv((3, 3), 1 => 2, relu), MaxPool((2, 2)))), LPPool((2, 2))
+    )
+    # Even the broadest possible `unwrap` splices only the custom wrapper;
+    # pooling layers are protected by RP's baked-in policy.
+    flat = first(flat_triple(model; unwrap=Returns(true)))
+    @test flat == Chain(Conv((3, 3), 1 => 2, relu), MaxPool((2, 2)), LPPool((2, 2)))
+end
+
+# RP's exported `canonize` fuses through the same policy
+let model = Chain(Chain(Conv((3, 3), 1 => 2), BatchNorm(2)), MaxPool((2, 2)))
+    ps, st = Lux.setup(StableRNG(123), model)
+    x = randn(StableRNG(1), Float32, 8, 8, 1, 4)
+    _, st = Lux.apply(model, x, ps, Lux.trainmode(st))
+    st = Lux.testmode(st)
+    model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
+    @test length(model_canonized) == 2 # Conv and BatchNorm fused
+    @test model_canonized[1] isa Conv
+    @test model_canonized[2] isa MaxPool
+    @test first(Lux.apply(model_canonized, x, ps_canonized, st_canonized)) ≈
+        first(Lux.apply(model, x, ps, st))
+end
