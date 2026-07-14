@@ -1,49 +1,44 @@
-#==============================#
-# FrozenLayer & Enzyme AD core #
-#==============================#
-
-# This file contains `FrozenLayer` — the bundled callable Lux triple all LRP
-# rules operate on — its execution helpers, and all Enzyme-specific code in
-# the package. The only AD primitive LRP requires is a vector-Jacobian
-# product (VJP) w.r.t. a layer's input — never w.r.t. its parameters.
-
 """
-    FrozenLayer(layer, ps, st)
+    StaticLayer(layer, ps, st)
 
 Immutable bundle of a Lux `layer` with its parameters `ps` and states `st`.
 Calling it applies the layer to an input, discarding the updated layer states.
 
-LRP rules and [`modify_layer`](@ref) operate on `FrozenLayer`s;
-modified parameters are stored in new `FrozenLayer` instances.
-Since `FrozenLayer` is immutable and never differentiated w.r.t. its contents,
+LRP rules and [`modify_layer`](@ref) operate on `StaticLayer`s;
+modified parameters are stored in new `StaticLayer` instances.
+Since `StaticLayer` is immutable and never differentiated w.r.t. its contents,
 it is safe to annotate it as `Enzyme.Const` in [`layer_pullback`](@ref).
 """
-struct FrozenLayer{L,P,S}
+# Named `StaticLayer` (not `FrozenLayer`) to avoid confusion with the unrelated
+# `Lux.Experimental.FrozenLayer`, which freezes *parameters* during training.
+struct StaticLayer{L,P,S}
     layer::L
     ps::P
     st::S
 end
-(f::FrozenLayer)(x) = first(apply(f.layer, x, f.ps, f.st))
+(f::StaticLayer)(x) = first(apply(f.layer, x, f.ps, f.st))
 
-Base.show(io::IO, f::FrozenLayer) = print(io, "FrozenLayer(", f.layer, ")")
+Base.show(io::IO, f::StaticLayer) = print(io, "StaticLayer(", f.layer, ")")
 
 # Bundle the children of a `Chain` or `Parallel` with their `ps`/`st` into a
-# NamedTuple of `FrozenLayer`s mirroring `model.layers`.
-function frozen_children(f::FrozenLayer{<:Union{Chain,Parallel}})
+# NamedTuple of `StaticLayer`s mirroring `model.layers`.
+function static_children(f::StaticLayer{<:Union{Chain,Parallel}})
     layers = f.layer.layers
     return NamedTuple{keys(layers)}(
-        map(FrozenLayer, values(layers), values(f.ps), values(f.st))
+        map(StaticLayer, values(layers), values(f.ps), values(f.st))
     )
 end
 
 # `SkipConnection` is an `AbstractLuxWrapperLayer`:
 # its `ps`/`st` pass through to the wrapped layer directly.
-frozen_inner(f::FrozenLayer{<:SkipConnection}) = FrozenLayer(f.layer.layers, f.ps, f.st)
+# `<:` because `SkipConnection` is parametric (`SkipConnection{L,C}`), so the
+# dispatch must match any concrete instantiation, not the bare `UnionAll` type.
+static_inner(f::StaticLayer{<:SkipConnection}) = StaticLayer(f.layer.layers, f.ps, f.st)
 
 # Compute activations of all layers, including the input.
 # Returns a tuple `(input, a¹, a², ..., aᴺ)` of length `length(layers) + 1`.
 # An execution helper, not a structural rewrite: it runs on NamedTuples of
-# callable `FrozenLayer`s (or their rule-modified counterparts), sits on the
+# callable `StaticLayer`s (or their rule-modified counterparts), sits on the
 # hot path of every `analyze` call, and relies on tuple recursion for
 # inferrability.
 get_activations(layers::NamedTuple, input) = (input, _activations(values(layers), input)...)
@@ -57,7 +52,7 @@ end
 """
     layer_pullback(layer, x)
 
-Compute the primal output `z = layer(x)` of a [`FrozenLayer`](@ref) and return
+Compute the primal output `z = layer(x)` of a [`StaticLayer`](@ref) and return
 `(z, back)`, where `back(s)` evaluates the VJP of `layer` at `x` with seed `s`
 w.r.t. the input `x`.
 
@@ -66,12 +61,17 @@ Enzyme split-mode reverse thunks cannot be re-run on the same tape.
 Rules that need VJPs with several seeds through the same layer
 construct one pullback per seed.
 """
-function layer_pullback(f::F, x::AbstractArray) where {F<:FrozenLayer}
+function layer_pullback(f::F, x::AbstractArray) where {F<:StaticLayer}
     fwd, rev = autodiff_thunk(
         ReverseSplitWithPrimal, Const{F}, Duplicated, Duplicated{typeof(x)}
     )
     dx = make_zero(x)
     tape, z, dz = fwd(Const(f), Duplicated(x, dx))
+    # Every activity annotation is load-bearing: `Const(f)` (the layer is not
+    # differentiated), the `Duplicated` return (we need both the primal `z` and
+    # a seedable cotangent `dz`), and `Duplicated(x, dx)` (the VJP is taken
+    # w.r.t. `x`, accumulating into `dx`). Split mode requires the *same*
+    # `Duplicated(x, dx)` in `fwd` and `rev`, so it is threaded through both.
     function back(s)
         dz .= s
         rev(Const(f), Duplicated(x, dx), tape)
@@ -79,3 +79,11 @@ function layer_pullback(f::F, x::AbstractArray) where {F<:FrozenLayer}
     end
     return z, back
 end
+# Why a hand-rolled per-layer pullback instead of one Enzyme pass over the model?
+# LRP is not plain backprop: each layer is differentiated through its
+# *rule-modified* forward pass (`modify_layer`) with a relevance-derived seed,
+# and the input relevance is `aᵏ .* vjp` (see `rules.jl`). We therefore need a
+# VJP through a *modified* layer with a custom seed, per layer. A single Enzyme
+# pass over the unmodified model — or an `EnzymeRule` teaching Enzyme how to
+# differentiate a layer — would compute the model's gradient, not the LRP
+# relevance redistribution.

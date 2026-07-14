@@ -9,7 +9,7 @@ const LRP_DEFAULT_ALPHA = 2.0f0
 const LRP_DEFAULT_BETA = 1.0f0
 
 # Generic LRP rule. Used by all rules without custom implementations.
-function lrp!(Rᵏ, rule::AbstractLRPRule, layer::FrozenLayer, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::AbstractLRPRule, layer::StaticLayer, modified_layer, aᵏ, Rᵏ⁺¹)
     layer = isnothing(modified_layer) ? layer : modified_layer
     ãᵏ = modify_input(rule, aᵏ)
     z, back = layer_pullback(layer, ãᵏ)
@@ -73,10 +73,10 @@ modify_denominator(rule, d) = stabilize_denom(d, LRP_DEFAULT_STABILIZER)
 """
     is_compatible(rule, layer)
 
-Check compatibility of a LRP-Rule with a [`FrozenLayer`](@ref).
+Check compatibility of a LRP-Rule with a [`StaticLayer`](@ref).
 By default, a rule is compatible with layers that have a `weight` parameter.
 """
-is_compatible(rule, layer::FrozenLayer) = has_weight(layer)
+is_compatible(rule, layer::StaticLayer) = has_weight(layer)
 
 struct LRPCompatibilityError <: Exception
     rule::String
@@ -120,7 +120,7 @@ modify_bias(rule, b) = modify_parameters(rule, b)
 """
     modify_layer(rule, layer)
 
-Modify a [`FrozenLayer`](@ref) before computing the relevance:
+Modify a [`StaticLayer`](@ref) before computing the relevance:
 weight and bias in `ps` are modified via `modify_weight` and `modify_bias`,
 and the layer's activation function is removed.
 Layers without weights are returned unmodified.
@@ -128,7 +128,7 @@ Layers without weights are returned unmodified.
 ## Note
 $LRP_LAYER_MODIFICATION_DIAGRAM
 """
-function modify_layer(rule, layer::FrozenLayer; keep_bias=true)
+function modify_layer(rule, layer::StaticLayer; keep_bias=true)
     !is_compatible(rule, layer) && throw(LRPCompatibilityError(rule, layer.layer))
     !has_weight(layer) && return layer
 
@@ -141,7 +141,7 @@ function modify_layer(rule, layer::FrozenLayer; keep_bias=true)
         (; weight, bias=zero(layer.ps.bias))
     end
     ps = merge(layer.ps, modified_ps)
-    return FrozenLayer(remove_activation(layer.layer), ps, layer.st)
+    return StaticLayer(remove_activation(layer.layer), ps, layer.st)
 end
 
 # Useful presets, used e.g. in AlphaBetaRule, ZBoxRule & ZPlusRule:
@@ -169,7 +169,7 @@ R_j^k = \\sum_i \\frac{W_{ij}a_j^k}{\\sum_l W_{il}a_l^k+b_i} R_i^{k+1}
 - $REF_BACH_LRP
 """
 struct ZeroRule <: AbstractLRPRule end
-is_compatible(::ZeroRule, layer::FrozenLayer) = true # compatible with all layer types
+is_compatible(::ZeroRule, layer::StaticLayer) = true # compatible with all layer types
 
 """
     EpsilonRule([epsilon=$(LRP_DEFAULT_EPSILON)])
@@ -193,7 +193,7 @@ struct EpsilonRule{T<:Real} <: AbstractLRPRule
     EpsilonRule(epsilon=LRP_DEFAULT_EPSILON) = new{eltype(epsilon)}(epsilon)
 end
 modify_denominator(r::EpsilonRule, d) = stabilize_denom(d, r.ϵ)
-is_compatible(::EpsilonRule, layer::FrozenLayer) = true # compatible with all layer types
+is_compatible(::EpsilonRule, layer::StaticLayer) = true # compatible with all layer types
 
 """
     GammaRule([gamma=$(LRP_DEFAULT_GAMMA)])
@@ -294,11 +294,11 @@ R_j^k = R_j^{k+1}
 ```
 """
 struct PassRule <: AbstractLRPRule end
-function lrp!(Rᵏ, ::PassRule, layer::FrozenLayer, _modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, ::PassRule, layer::StaticLayer, _modified_layer, aᵏ, Rᵏ⁺¹)
     return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
 end
-modify_layer(::PassRule, layer::FrozenLayer) = nothing # no modified layer needed
-is_compatible(::PassRule, layer::FrozenLayer) = true
+modify_layer(::PassRule, layer::StaticLayer) = nothing # no modified layer needed
+is_compatible(::PassRule, layer::StaticLayer) = true
 
 reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹) = Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
 
@@ -325,7 +325,7 @@ struct ZBoxRule{T} <: AbstractLRPRule
     low::T
     high::T
 end
-function modify_layer(::ZBoxRule, layer::FrozenLayer)
+function modify_layer(::ZBoxRule, layer::StaticLayer)
     return (
         layer⁺ = modify_layer(Val(:keep_positive), layer),
         layer⁻ = modify_layer(Val(:keep_negative), layer),
@@ -333,7 +333,7 @@ function modify_layer(::ZBoxRule, layer::FrozenLayer)
 end
 
 # The ZBoxRule requires its own implementation of relevance propagation.
-function lrp!(Rᵏ, rule::ZBoxRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::ZBoxRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
     l = zbox_input(aᵏ, rule.low)
     h = zbox_input(aᵏ, rule.high)
 
@@ -374,14 +374,14 @@ R_j^k = \\sum_i\\frac{\\left(W_{ij}a_j^k\\right)^+}{\\sum_l\\left(W_{il}a_l^k+b_
 - $REF_MONTAVON_DTD
 """
 struct ZPlusRule <: AbstractLRPRule end
-function modify_layer(::ZPlusRule, layer::FrozenLayer)
+function modify_layer(::ZPlusRule, layer::StaticLayer)
     return (
         layer⁺ = modify_layer(Val(:keep_positive), layer),
         layer⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
     )
 end
 
-function lrp!(Rᵏ, rule::ZPlusRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::ZPlusRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
@@ -429,7 +429,7 @@ struct AlphaBetaRule{T<:Real} <: AbstractLRPRule
         return new{eltype(alpha)}(alpha, beta)
     end
 end
-function modify_layer(::AlphaBetaRule, layer::FrozenLayer)
+function modify_layer(::AlphaBetaRule, layer::StaticLayer)
     return (
         layerᵅ⁺ = modify_layer(Val(:keep_positive), layer),
         layerᵅ⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
@@ -438,7 +438,7 @@ function modify_layer(::AlphaBetaRule, layer::FrozenLayer)
     )
 end
 
-function lrp!(Rᵏ, rule::AlphaBetaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::AlphaBetaRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
@@ -494,7 +494,7 @@ struct GeneralizedGammaRule{T<:Real} <: AbstractLRPRule
     γ::T
     GeneralizedGammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
 end
-function modify_layer(rule::GeneralizedGammaRule, layer::FrozenLayer)
+function modify_layer(rule::GeneralizedGammaRule, layer::StaticLayer)
     # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation
     rule⁺ = GammaRule(rule.γ)
     rule⁻ = NegativeGammaRule(rule.γ)
@@ -506,7 +506,7 @@ function modify_layer(rule::GeneralizedGammaRule, layer::FrozenLayer)
     )
 end
 
-function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::FrozenLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
 
@@ -560,9 +560,9 @@ normalization v3 (Flux) applied.
 - $REF_ALI_TRANSFORMER
 """
 struct LayerNormRule <: AbstractLRPRule end
-is_compatible(::LayerNormRule, ::FrozenLayer{<:LayerNorm}) = true
+is_compatible(::LayerNormRule, ::StaticLayer{<:LayerNorm}) = true
 
-function lrp!(Rᵏ, ::LayerNormRule, f::FrozenLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, ::LayerNormRule, f::StaticLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹)
     layer = f.layer
     dims = layer.dims # Colon() means statistics over all dimensions
     μₐ = mean(aᵏ; dims=dims)
@@ -577,7 +577,7 @@ function lrp!(Rᵏ, ::LayerNormRule, f::FrozenLayer{<:LayerNorm}, _modified_laye
         # Call ZeroRule on the affine part as a fallback when the model is not
         # canonized. The Scale layer carries the activation; LRP removes it in
         # modify_layer.
-        scale = FrozenLayer(
+        scale = StaticLayer(
             Scale(layer.shape, layer.activation),
             (; weight=f.ps.scale, bias=f.ps.bias),
             NamedTuple(),
@@ -604,14 +604,14 @@ end
 for R in (ZeroRule, EpsilonRule)
     for L in (DropoutLayer, ReshapingLayer)
         @eval function lrp!(
-            Rᵏ, _rule::$R, _layer::FrozenLayer{<:$L}, _modified_layer, aᵏ, Rᵏ⁺¹
+            Rᵏ, _rule::$R, _layer::StaticLayer{<:$L}, _modified_layer, aᵏ, Rᵏ⁺¹
         )
             return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
         end
     end
 end
 
-function lrp!(Rᵏ, _rule::FlatRule, _layer::FrozenLayer{<:Dense}, _modified_layer, _aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, _rule::FlatRule, _layer::StaticLayer{<:Dense}, _modified_layer, _aᵏ, Rᵏ⁺¹)
     n = size(Rᵏ, 1) # number of input neurons connected to each output neuron
     for i in axes(Rᵏ, 2) # samples in batch
         fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)

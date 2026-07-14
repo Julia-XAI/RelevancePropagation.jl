@@ -5,9 +5,9 @@
 # Construct the NamedTuple of modified layers by zipping rules and layers
 # along the model structure.
 function get_modified_layers(
-    rules::NamedTuple, frozen::FrozenLayer{<:Union{Chain,Parallel}}
+    rules::NamedTuple, static::StaticLayer{<:Union{Chain,Parallel}}
 )
-    children = frozen_children(frozen)
+    children = static_children(static)
     if keys(rules) != keys(children)
         throw(
             ArgumentError(
@@ -19,16 +19,16 @@ function get_modified_layers(
         map(get_modified_layers, values(rules), values(children))
     )
 end
-function get_modified_layers(rules, frozen::FrozenLayer{<:SkipConnection})
-    return get_modified_layers(rules, frozen_inner(frozen))
+function get_modified_layers(rules, static::StaticLayer{<:SkipConnection})
+    return get_modified_layers(rules, static_inner(static))
 end
-get_modified_layers(rule::AbstractLRPRule, frozen::FrozenLayer) = modify_layer(rule, frozen)
+get_modified_layers(rule::AbstractLRPRule, static::StaticLayer) = modify_layer(rule, static)
 # Disambiguation: a rule assigned to a SkipConnection recurses into the wrapped layer
-function get_modified_layers(rule::AbstractLRPRule, frozen::FrozenLayer{<:SkipConnection})
-    return get_modified_layers(rule, frozen_inner(frozen))
+function get_modified_layers(rule::AbstractLRPRule, static::StaticLayer{<:SkipConnection})
+    return get_modified_layers(rule, static_inner(static))
 end
-function get_modified_layers(rules, frozen::FrozenLayer)
-    throw(ArgumentError("Expected an LRP rule for layer $(frozen.layer), got $rules."))
+function get_modified_layers(rules, static::StaticLayer)
+    throw(ArgumentError("Expected an LRP rule for layer $(static.layer), got $rules."))
 end
 
 #=============================#
@@ -63,6 +63,10 @@ If no rules are passed, [`ZeroRule`](@ref) is used on all layers.
 [2] W. Samek et al., Explaining Deep Neural Networks and Beyond: A Review of Methods and Applications
 """
 struct LRP{M<:Chain,P,S,R<:NamedTuple,L<:NamedTuple,ML<:NamedTuple} <: AbstractXAIMethod
+    # `model`/`ps`/`st` are the Lux triple the analyzer was built from. The
+    # backward pass only reads `layers`/`modified_layers` below, but `model` is
+    # still needed: `show` iterates `model.layers` to print layer names, and
+    # `CRP` uses `length(model)`. `ps`/`st` are kept to preserve the full triple.
     model::M
     ps::P
     st::S
@@ -89,9 +93,9 @@ struct LRP{M<:Chain,P,S,R<:NamedTuple,L<:NamedTuple,ML<:NamedTuple} <: AbstractX
             check_output_softmax(model)
             check_lrp_compat(model; verbose=verbose)
         end
-        frozen = FrozenLayer(model, ps, st)
-        layers = frozen_children(frozen)
-        modified_layers = get_modified_layers(rules, frozen)
+        static = StaticLayer(model, ps, st)
+        layers = static_children(static)
+        modified_layers = get_modified_layers(rules, static)
         return new{
             typeof(model),
             typeof(ps),
@@ -173,9 +177,9 @@ end
 # mirroring the model structure (like `ps` and `st`).
 
 function lrp!(
-    Rᵏ, rules::NamedTuple, chain::FrozenLayer{<:Chain}, modified_chain::NamedTuple, aᵏ, Rᵏ⁺¹
+    Rᵏ, rules::NamedTuple, chain::StaticLayer{<:Chain}, modified_chain::NamedTuple, aᵏ, Rᵏ⁺¹
 )
-    layers = frozen_children(chain)
+    layers = static_children(chain)
     as = get_activations(layers, aᵏ)
     Rs = similar.(as)
     last(Rs) .= Rᵏ⁺¹
@@ -187,12 +191,12 @@ end
 function lrp!(
     Rᵏ,
     rules::NamedTuple,
-    parallel::FrozenLayer{<:Parallel},
+    parallel::StaticLayer{<:Parallel},
     modified_parallel::NamedTuple,
     aᵏ,
     Rᵏ⁺¹,
 )
-    children = frozen_children(parallel)
+    children = static_children(parallel)
 
     # Re-compute contributions of parallel branches to output activation
     aᵏ⁺¹s = map(child -> child(aᵏ), values(children))
@@ -215,9 +219,9 @@ function lrp!(
 end
 
 function lrp_skip_connection!(
-    Rᵏ, rules, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
+    Rᵏ, rules, sc::StaticLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
 )
-    inner = frozen_inner(sc)
+    inner = static_inner(sc)
 
     # Compute contributions of the wrapped layer and the skip connection to the
     # output activation. For the skip connection, activations stay constant:
@@ -240,8 +244,8 @@ end
 
 # `SkipConnection` is transparent in `rules` and `modified_layers` (like in
 # `ps`/`st`), so `lrp!` can be reached with a single rule paired with a
-# `FrozenLayer{<:SkipConnection}`. Route each rule type with its own generic
-# `lrp!(Rᵏ, rule, layer::FrozenLayer, ...)` method explicitly to the skip
+# `StaticLayer{<:SkipConnection}`. Route each rule type with its own generic
+# `lrp!(Rᵏ, rule, layer::StaticLayer, ...)` method explicitly to the skip
 # connection handler to avoid method ambiguities.
 for R in (
     :NamedTuple,
@@ -253,7 +257,7 @@ for R in (
     :GeneralizedGammaRule,
 )
     @eval function lrp!(
-        Rᵏ, rules::$R, sc::FrozenLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
+        Rᵏ, rules::$R, sc::StaticLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
     )
         return lrp_skip_connection!(Rᵏ, rules, sc, modified, aᵏ, Rᵏ⁺¹)
     end

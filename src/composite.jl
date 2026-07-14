@@ -24,20 +24,8 @@ Enumerate all layers in a Lux model, mirroring the model structure as nested
 `NamedTuple`s with `Functors.KeyPath` leaves that address each layer like the
 model's `ps` and `st`.
 
-# Example:
-```julia-repl
-julia> d = Dense(2 => 2);
-
-julia> model = Chain(d, Parallel(+, d, d, Chain(d, d)), d);
-
-julia> layer_indices(model)
-(layer_1 = KeyPath(:layer_1,),
- layer_2 = (layer_1 = KeyPath(:layer_2, :layer_1),
-            layer_2 = KeyPath(:layer_2, :layer_2),
-            layer_3 = (layer_1 = KeyPath(:layer_2, :layer_3, :layer_1),
-                       layer_2 = KeyPath(:layer_2, :layer_3, :layer_2))),
- layer_3 = KeyPath(:layer_3,))
-```
+The returned `NamedTuple` prints on a single line; use
+[`show_layer_indices`](@ref) for a readable, per-layer rendering.
 """
 layer_indices(model) = layer_indices(model, KeyPath())
 function layer_indices(model::Union{Chain,Parallel}, path::KeyPath)
@@ -55,8 +43,30 @@ layer_indices(layer, path::KeyPath) = path
 """
     show_layer_indices(model)
 
-Print layer indices of Lux models.
-This is primarily a utility to help define [`LayerMap`](@ref) primitives.
+Print the layer indices of a Lux model, one `KeyPath` per line, mirroring the
+model structure. This is primarily a utility to help define [`LayerMap`](@ref)
+primitives.
+
+# Example
+```jldoctest; setup = :(using RelevancePropagation, Lux)
+julia> d = Dense(2 => 2);
+
+julia> model = Chain(d, Parallel(+, d, d, Chain(d, d)), d);
+
+julia> show_layer_indices(model)
+LayerIndices(
+  KeyPath(:layer_1,),
+  (
+    KeyPath(:layer_2, :layer_1),
+    KeyPath(:layer_2, :layer_2),
+    (
+      KeyPath(:layer_2, :layer_3, :layer_1),
+      KeyPath(:layer_2, :layer_3, :layer_2),
+    ),
+  ),
+  KeyPath(:layer_3,),
+)
+```
 """
 show_layer_indices(model) = LayerIndices(layer_indices(model))
 

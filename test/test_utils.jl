@@ -1,7 +1,7 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: FrozenLayer, activation_fn
+using RelevancePropagation: StaticLayer, activation_fn
 using RelevancePropagation: has_weight, has_bias
 using RelevancePropagation: check_output_softmax
 using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
@@ -10,22 +10,22 @@ using Lux
 using LuxCore: AbstractLuxWrapperLayer
 using StableRNGs: StableRNG
 
-frozen_layer(layer) = FrozenLayer(layer, Lux.setup(StableRNG(123), layer)...)
+static_layer(layer) = StaticLayer(layer, Lux.setup(StableRNG(123), layer)...)
 
-# RP extends ModelSurgeon's `activation_fn` with a `FrozenLayer` method
-@test activation_fn(frozen_layer(Dense(5 => 2, gelu))) == gelu
-@test isnothing(activation_fn(frozen_layer(MaxPool((2, 2)))))
+# RP extends ModelSurgeon's `activation_fn` with a `StaticLayer` method
+@test activation_fn(static_layer(Dense(5 => 2, gelu))) == gelu
+@test isnothing(activation_fn(static_layer(MaxPool((2, 2)))))
 
-# has_weight / has_bias on FrozenLayer
-@test has_weight(frozen_layer(Dense(2 => 2)))
-@test has_bias(frozen_layer(Dense(2 => 2)))
-@test has_weight(frozen_layer(Dense(2 => 2; use_bias=false)))
-@test !has_bias(frozen_layer(Dense(2 => 2; use_bias=false)))
-@test has_weight(frozen_layer(Scale(2)))
-@test has_bias(frozen_layer(Scale(2)))
-@test has_weight(frozen_layer(Conv((3, 3), 3 => 2)))
-@test !has_weight(frozen_layer(MaxPool((2, 2))))
-@test !has_weight(frozen_layer(BatchNorm(2))) # BatchNorm ps are (scale, bias)
+# has_weight / has_bias on StaticLayer
+@test has_weight(static_layer(Dense(2 => 2)))
+@test has_bias(static_layer(Dense(2 => 2)))
+@test has_weight(static_layer(Dense(2 => 2; use_bias=false)))
+@test !has_bias(static_layer(Dense(2 => 2; use_bias=false)))
+@test has_weight(static_layer(Scale(2)))
+@test has_bias(static_layer(Scale(2)))
+@test has_weight(static_layer(Conv((3, 3), 3 => 2)))
+@test !has_weight(static_layer(MaxPool((2, 2))))
+@test !has_weight(static_layer(BatchNorm(2))) # BatchNorm ps are (scale, bias)
 
 # check_output_softmax
 @test_throws ArgumentError check_output_softmax(Chain(Dense(2 => 2), softmax))

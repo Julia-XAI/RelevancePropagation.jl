@@ -2,7 +2,7 @@ using BenchmarkTools
 using Lux
 using StableRNGs: StableRNG
 using RelevancePropagation
-using RelevancePropagation: FrozenLayer, lrp!, modify_layer
+using RelevancePropagation: StaticLayer, lrp!, modify_layer
 
 T = Float32
 input_size = (32, 32, 3, 1)
@@ -55,11 +55,11 @@ conv = Conv((3, 3), 3 => 2)
 dense = Dense(in_dense => out_dense, relu)
 layers = Dict(
     "Conv" => (
-        FrozenLayer(conv, Lux.setup(StableRNG(123), conv)...),
+        StaticLayer(conv, Lux.setup(StableRNG(123), conv)...),
         rand(StableRNG(2), T, insize),
     ),
     "Dense" => (
-        FrozenLayer(dense, Lux.setup(StableRNG(123), dense)...),
+        StaticLayer(dense, Lux.setup(StableRNG(123), dense)...),
         randn(StableRNG(3), T, in_dense, 1),
     ),
 )

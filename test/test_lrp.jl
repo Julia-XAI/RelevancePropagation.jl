@@ -1,7 +1,7 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: FrozenLayer, lrp!, modify_layer
+using RelevancePropagation: StaticLayer, lrp!, modify_layer
 using Lux
 using StableRNGs: StableRNG
 

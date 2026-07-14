@@ -2,7 +2,7 @@ using RelevancePropagation
 using Test
 using ReferenceTests
 
-using RelevancePropagation: FrozenLayer, lrp!, modify_input, modify_denominator
+using RelevancePropagation: StaticLayer, lrp!, modify_input, modify_denominator
 using RelevancePropagation: is_compatible, modify_layer, modify_weight, modify_bias
 using RelevancePropagation: modify_parameters
 using RelevancePropagation: activation_fn
@@ -16,9 +16,9 @@ using StableRNGs: StableRNG
 T = Float32
 pseudorandn(dims...) = randn(StableRNG(123), T, dims...)
 
-function frozen_testmode(layer)
+function static_testmode(layer)
     ps, st = Lux.setup(StableRNG(123), layer)
-    return FrozenLayer(layer, ps, Lux.testmode(st))
+    return StaticLayer(layer, ps, Lux.testmode(st))
 end
 
 const RULES = Dict(
@@ -45,7 +45,7 @@ const RULES = Dict(
     b = [7.0, 8.0]
     Rᵏ = reshape([17 / 90, 316 / 675], 2, 1) # expected output
 
-    layer = FrozenLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
+    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
     modified_layer = modify_layer(rule, layer)
     @test activation_fn(modified_layer) == identity
     @test modified_layer.ps.weight == W
@@ -65,7 +65,7 @@ const RULES = Dict(
     aᵏ = reshape(repeat(aᵏ, 1, 3), 3, 3, 3, 1)
     Rᵏ = reshape(repeat(Rᵏ, 1, 3), 3, 3, 3, 1)
 
-    layer = frozen_testmode(MaxPool((2, 2); stride=(1, 1)))
+    layer = static_testmode(MaxPool((2, 2); stride=(1, 1)))
     modified_layer = modify_layer(rule, layer)
     @test modified_layer === layer # layers without weights are not modified
 
@@ -80,7 +80,7 @@ const RULES = Dict(
     b = [1.0, -3.0]
     Rᵏ = reshape([2 / 3, 8 / 3], 2, 1) # expected output
 
-    layer = FrozenLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
+    layer = StaticLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
     modified_layer = modify_layer(rule, layer)
 
     R̂ᵏ = similar(aᵏ) # will be inplace updated
@@ -91,7 +91,7 @@ end
 @testset "modify_layer" begin
     W = [1.0 -1.0; 2.0 0.0]
     b = [-1.0, 1.0]
-    layer = FrozenLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
+    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
 
     # ZeroRule and EpsilonRule don't modify parameters
     for rule in (ZeroRule(), EpsilonRule())
@@ -107,7 +107,7 @@ end
     @test iszero(modified_layer.ps.bias)
 
     # Layers without bias parameters stay bias-free
-    layer_nobias = FrozenLayer(
+    layer_nobias = StaticLayer(
         Dense(2 => 2, relu; use_bias=false), (; weight=W), NamedTuple()
     )
     modified_layer = modify_layer(ZeroRule(), layer_nobias)
@@ -183,7 +183,7 @@ end
     aᵏ = [1.0f0, 1.0f0]
     W = [1.0f0 -1.0f0]
     b = [-1.0f0]
-    layer = FrozenLayer(Dense(2 => 1), (; weight=W, bias=b), NamedTuple())
+    layer = StaticLayer(Dense(2 => 1), (; weight=W, bias=b), NamedTuple())
     Rᵏ⁺¹ = layer(aᵏ)
 
     # Expected outputs
@@ -213,7 +213,7 @@ end
     a⁻ = [-1.0, 0.0]
     W = [1.0 -4.0; 2.0 0.0]
     b = [-2.0, 3.0]
-    layer = FrozenLayer(Dense(2 => 2, leakyrelu), (; weight=W, bias=b), NamedTuple()) # leakyrelu defaults to a=0.01
+    layer = StaticLayer(Dense(2 => 2, leakyrelu), (; weight=W, bias=b), NamedTuple()) # leakyrelu defaults to a=0.01
     Rᵏ⁺¹ = [-0.07; 1.0]
     Rᵏ⁺¹⁺ = [0.0; 1.0]
     Rᵏ⁺¹⁻ = [-0.07; 0.0]
@@ -271,7 +271,7 @@ end
     ###################
     # relu activation #
     ###################
-    layer = FrozenLayer(LayerNorm((2, 2), relu; epsilon=0.0f0), ps_affine, NamedTuple())
+    layer = StaticLayer(LayerNorm((2, 2), relu; epsilon=0.0f0), ps_affine, NamedTuple())
 
     # not canonized
     modified_layer = modify_layer(rule, layer)
@@ -282,8 +282,8 @@ end
     # canonized: LayerNorm splits into normalization and affine Scale part
     model = Chain(LayerNorm((2, 2), relu; epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=ps_affine), (; layer_1=NamedTuple()))
-    layer_1 = FrozenLayer(model[1], ps.layer_1, st.layer_1)
-    layer_2 = FrozenLayer(model[2], ps.layer_2, st.layer_2)
+    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
+    layer_2 = StaticLayer(model[2], ps.layer_2, st.layer_2)
     modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
     modified_layer_2 = modify_layer(ZeroRule(), layer_2)
 
@@ -298,7 +298,7 @@ end
     ############################
     # no affine transformation #
     ############################
-    layer = FrozenLayer(
+    layer = StaticLayer(
         LayerNorm((2, 2); affine=false, epsilon=0.0f0), NamedTuple(), NamedTuple()
     )
 
@@ -312,7 +312,7 @@ end
     model = Chain(LayerNorm((2, 2); affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
     @test length(model.layers) == 1
-    layer_1 = FrozenLayer(model[1], ps.layer_1, st.layer_1)
+    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
     modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
 
     R̂ᵏ = zero(aᵏ)
@@ -322,7 +322,7 @@ end
     ######################################
     # no affine transformation, but relu #
     ######################################
-    layer = FrozenLayer(
+    layer = StaticLayer(
         LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0), NamedTuple(), NamedTuple()
     )
 
@@ -335,8 +335,8 @@ end
     # canonized: splits into normalization and a bias-free Scale carrying relu
     model = Chain(LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
-    layer_1 = FrozenLayer(model[1], ps.layer_1, st.layer_1)
-    layer_2 = FrozenLayer(model[2], ps.layer_2, st.layer_2)
+    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
+    layer_2 = StaticLayer(model[2], ps.layer_2, st.layer_2)
     modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
     modified_layer_2 = modify_layer(ZeroRule(), layer_2)
 
@@ -355,7 +355,7 @@ end
 
     # Dense layer
     W, b = [1.0 -1.0; 2.0 0.0], [-1.0, 1.0]
-    layer = FrozenLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
+    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
 
     modified_layer = modify_layer(rule, layer)
     @test modified_layer.ps.weight ≈ [1.42 -1.0; 2.84 0.0]
@@ -386,7 +386,7 @@ end
 
     # Scale layer: Lux uniformly names the parameter `weight`, not `scale`
     w, b = [1.0, -1.0], [-1.0, 1.0]
-    layer = FrozenLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
+    layer = StaticLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
 
     modified_layer = modify_layer(rule, layer)
     @test modified_layer.ps.weight ≈ [1.42, -1.0]
@@ -417,12 +417,12 @@ batchsize = 2
 aᵏ_dense = pseudorandn(din, batchsize)
 
 layers = Dict(
-    "Dense_relu" => FrozenLayer(
+    "Dense_relu" => StaticLayer(
         Dense(din => dout, relu),
         (; weight=pseudorandn(dout, din), bias=pseudorandn(dout)),
         NamedTuple(),
     ),
-    "Dense_identity" => FrozenLayer(
+    "Dense_identity" => StaticLayer(
         Dense(din => dout; use_bias=false),
         (; weight=Matrix{Float32}(I, dout, din)),
         NamedTuple(),
@@ -447,11 +447,11 @@ batchsize = 2
 aᵏ_scale = pseudorandn(d, batchsize)
 
 layers = Dict(
-    "Scale_relu" => FrozenLayer(
+    "Scale_relu" => StaticLayer(
         Scale(d, relu), (; weight=pseudorandn(d), bias=pseudorandn(d)), NamedTuple()
     ),
     "Scale_identity" =>
-        FrozenLayer(Scale(d; use_bias=false), (; weight=ones(Float32, d)), NamedTuple()),
+        StaticLayer(Scale(d; use_bias=false), (; weight=ones(Float32, d)), NamedTuple()),
 )
 @testset "Scale" begin
     for (rulename, rule) in RULES
@@ -470,14 +470,14 @@ cin, cout = 3, 4
 insize = (6, 6, 3, batchsize)
 aᵏ = pseudorandn(insize...)
 layers = Dict(
-    "Conv"           => FrozenLayer(Conv((3, 3), cin => cout), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
-    "Conv_relu"      => FrozenLayer(Conv((3, 3), cin => cout, relu), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
-    "MaxPool"        => frozen_testmode(MaxPool((3, 3))),
-    "MeanPool"       => frozen_testmode(MeanPool((3, 3))),
-    "GlobalMaxPool"  => frozen_testmode(GlobalMaxPool()),
-    "GlobalMeanPool" => frozen_testmode(GlobalMeanPool()),
-    "flatten"        => frozen_testmode(FlattenLayer()),
-    "Dropout"        => frozen_testmode(Dropout(0.2f0)),
+    "Conv"           => StaticLayer(Conv((3, 3), cin => cout), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
+    "Conv_relu"      => StaticLayer(Conv((3, 3), cin => cout, relu), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
+    "MaxPool"        => static_testmode(MaxPool((3, 3))),
+    "MeanPool"       => static_testmode(MeanPool((3, 3))),
+    "GlobalMaxPool"  => static_testmode(GlobalMaxPool()),
+    "GlobalMeanPool" => static_testmode(GlobalMeanPool()),
+    "flatten"        => static_testmode(FlattenLayer()),
+    "Dropout"        => static_testmode(Dropout(0.2f0)),
 )
 @testset "Other Layers" begin
     for (rulename, rule) in RULES

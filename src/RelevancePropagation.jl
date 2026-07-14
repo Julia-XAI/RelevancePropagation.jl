@@ -7,13 +7,8 @@ using XAIBase: AbstractOutputSelector
 using XAIBase: AbstractFeatureSelector, number_of_features
 
 using Lux: Chain, Parallel, SkipConnection
-using Lux: Dense, Scale, Conv, ConvTranspose
-using Lux: BatchNorm, LayerNorm
-using Lux:
-    MaxPool, MeanPool, AdaptiveMaxPool, AdaptiveMeanPool, GlobalMaxPool, GlobalMeanPool
-using Lux: LPPool, AdaptiveLPPool, GlobalLPPool
-using Lux: Dropout, AlphaDropout, VariationalHiddenDropout
-using Lux: FlattenLayer, ReshapeLayer, NoOpLayer, WrappedFunction
+using Lux: Dense, Scale, LayerNorm
+using Lux: NoOpLayer, WrappedFunction
 using Lux: apply, testmode
 
 using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
@@ -33,15 +28,15 @@ using Statistics: mean, var
 # `model_surgery.jl`.
 include("ModelSurgeon/ModelSurgeon.jl")
 using .ModelSurgeon: ModelSurgeon
-using .ModelSurgeon: DataflowLayer
+using .ModelSurgeon: DataflowLayer, ConvLayer, DropoutLayer, ReshapingLayer
+using .ModelSurgeon: PoolingLayer, LPPoolLayer, NormalizationLayer
 using .ModelSurgeon: children_layers, map_layers, chainall
 using .ModelSurgeon: activation_fn, remove_activation
 using .ModelSurgeon: strip_softmax, has_output_softmax
 
 include("bibliography.jl")
 include("autodiff.jl")
-include("layer_types.jl")
-include("layer_utils.jl")
+include("lux_layers.jl")
 include("model_surgery.jl")
 include("utils.jl")
 include("checks.jl")

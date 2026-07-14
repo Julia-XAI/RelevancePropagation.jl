@@ -19,15 +19,21 @@ keeping consumers piracy-free.
 module ModelSurgeon
 
 using Lux: Chain, Parallel, SkipConnection
-using Lux: Dense, Scale, Conv, BatchNorm, LayerNorm
-using Lux: NoOpLayer, WrappedFunction
+using Lux: Dense, Scale, Conv, ConvTranspose, BatchNorm, LayerNorm
+using Lux:
+    MaxPool, MeanPool, AdaptiveMaxPool, AdaptiveMeanPool, GlobalMaxPool, GlobalMeanPool
+using Lux: LPPool, AdaptiveLPPool, GlobalLPPool
+using Lux: Dropout, AlphaDropout, VariationalHiddenDropout
+using Lux: FlattenLayer, ReshapeLayer, NoOpLayer, WrappedFunction
 using LuxCore: AbstractLuxWrapperLayer
 using ConstructionBase: setproperties
 using Functors: Functors, KeyPath, fmap_with_path
 using NNlib: softmax, softmax!
 using Static: static
 
-export DataflowLayer, SoftmaxActivation
+export DataflowLayer, ConvLayer, DropoutLayer, ReshapingLayer
+export MaxPoolLayer, MeanPoolLayer, PoolingLayer, LPPoolLayer, NormalizationLayer
+export SoftmaxActivation
 export activation_fn, remove_activation
 export children_layers, map_layers, chainall, first_element, last_element
 export map_triple
@@ -35,8 +41,7 @@ export flatten_model
 export canonize, canonize_split, canonize_fuse, is_fuseable, split_activation
 export strip_softmax, has_output_softmax
 
-include("types.jl")
-include("layer_utils.jl")
+include("lux_layers.jl")
 include("traverse.jl")
 include("flatten.jl")
 include("canonize.jl")

@@ -1,4 +1,4 @@
-using RelevancePropagation: FrozenLayer, layer_pullback
+using RelevancePropagation: StaticLayer, layer_pullback
 using Test
 
 using Lux
@@ -36,12 +36,12 @@ LAYERS_1SEED = [
     ("Dropout testmode", Dropout(0.5f0), x_img),
 ]
 
-frozen(layer) = FrozenLayer(layer, Lux.setup(StableRNG(123), layer)...)
+static(layer) = StaticLayer(layer, Lux.setup(StableRNG(123), layer)...)
 
 @testset "layer_pullback vs Zygote" begin
     for (name, layer, x) in LAYERS_1SEED
         @testset "$name" begin
-            f = frozen(layer)
+            f = static(layer)
             z_ref, back_ref = Zygote.pullback(f, x)
             s = randn(StableRNG(17), Float32, size(z_ref)...)
             dx_ref = only(back_ref(s))
