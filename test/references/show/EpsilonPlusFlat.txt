@@ -13,9 +13,9 @@ Composite(
     ReshapeLayer             => PassRule(),
     NoOpLayer                => PassRule(),
     typeof(identity)         => PassRule(),
- ),
+  ),
   FirstLayerTypeMap(  # first layer
     Conv          => FlatRule(),
     ConvTranspose => FlatRule(),
- ),
+  ),
 )

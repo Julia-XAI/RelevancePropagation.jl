@@ -1,4 +1,13 @@
 # https://julia-xai.github.io/RelevancePropagation.jl/dev/lrp/developer/
+"""
+    AbstractLRPRule
+
+Abstract supertype of all LRP rules.
+Custom rules must subtype `AbstractLRPRule` and can customize their behavior by
+extending [`modify_input`](@ref), [`modify_denominator`](@ref),
+[`modify_parameters`](@ref), [`modify_layer`](@ref) and [`is_compatible`](@ref),
+or by implementing a custom `lrp!` method.
+"""
 abstract type AbstractLRPRule end
 
 # Default parameters
@@ -84,7 +93,7 @@ struct LRPCompatibilityError <: Exception
     LRPCompatibilityError(rule, layer) = new("$rule", "$layer")
 end
 function Base.showerror(io::IO, e::LRPCompatibilityError)
-    return print(io, "LRP rule", e.rule, "isn't compatible with layer ", e.layer)
+    return print(io, "LRP rule ", e.rule, " isn't compatible with layer ", e.layer)
 end
 
 """

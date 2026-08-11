@@ -116,11 +116,11 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   same layer (`AlphaBetaRule`, `GeneralizedGammaRule`) construct one
   single-use pullback per seed; the cost is one extra forward pass per
   layer, and the thunk is compiled only once per layer and input type.
-- **Layers are differentiated as immutable `FrozenLayer(layer, ps, st)`
-  bundles** annotated `Enzyme.Const`. `Lux.StatefulLuxLayer` was rejected:
+- **Layers are differentiated as immutable `StaticLayer(layer, ps, st)`
+  bundles** (named to avoid confusion with `Lux.Experimental.FrozenLayer`) annotated `Enzyme.Const`. `Lux.StatefulLuxLayer` was rejected:
   it mutates itself on every call, which is unsafe to annotate `Const`
   across split-mode fwd/rev boundaries. LRP never uses updated states, so
-  `FrozenLayer` discards them.
+  `StaticLayer` discards them.
 - **Enzyme accumulates (`+=`) into shadow buffers** — any reuse of shadows
   across calls requires `make_zero!` in between, or relevances silently
   accumulate.
@@ -142,7 +142,7 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 - `ModelIndex` → `Functors.KeyPath` (what Lux's own `layer_map` uses) for
   `LayerMap`/`show_layer_indices`.
 - `copy_layer` is gone: rules modify `ps` NamedTuples and wrap them in new
-  `FrozenLayer`s; the activation swap is the one generic `setproperties`
+  `StaticLayer`s; the activation swap is the one generic `setproperties`
   call above.
 - Dependencies: dropped Flux, Zygote, MacroTools, MLUtils,
   DifferentiationInterface (never added — raw Enzyme by design); added
@@ -151,7 +151,7 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 - CRP kept the v3 algorithm unchanged: the analyzer's
   `rules`/`layers`/`modified_layers` NamedTuples are unpacked positionally
   with `values()` for the `k`-indexed backward loops, and activations come
-  from `get_activations` on the `FrozenLayer` NamedTuple. The flat-model
+  from `get_activations` on the `StaticLayer` NamedTuple. The flat-model
   assumption (positional `layer::Int`) is now documented in the docstring.
 
 ## Compilation latency

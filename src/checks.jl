@@ -1,3 +1,11 @@
+"""
+    LRP_CONFIG
+
+Configuration module for the LRP model checks.
+Extend [`LRP_CONFIG.supports_layer`](@ref) and
+[`LRP_CONFIG.supports_activation`](@ref) to register custom layers and
+activation functions as LRP-compatible.
+"""
 module LRP_CONFIG
 using RelevancePropagation
 using RelevancePropagation: LRPSupportedLayer, LRPSupportedActivation
@@ -41,13 +49,26 @@ function lrp_check_activation(layer)
     return true
 end
 
+# The LRP backward pass distributes relevance between branches assuming they
+# are combined additively (see the `Parallel` and `SkipConnection` handlers in
+# `lrp.jl`). Any other `connection` would silently produce wrong relevances,
+# so the model checks reject it.
+lrp_check_connection(layer) = true
+lrp_check_connection(p::Parallel) = p.connection === +
+lrp_check_connection(s::SkipConnection) = s.connection === +
+
+lrp_check_connections(layer) = true
+function lrp_check_connections(model::DataflowLayer)
+    return lrp_check_connection(model) && all(lrp_check_connections, children_layers(model))
+end
+
 """
     check_lrp_compat(model; verbose=true)
 
 Check whether LRP can be used on the model.
 """
 function check_lrp_compat(model::Chain; verbose=true)
-    passed_checks = chainall(lrp_check_layer, model)
+    passed_checks = chainall(lrp_check_layer, model) && lrp_check_connections(model)
     if !passed_checks
         if verbose
             print_lrp_model_check(stdout, model)
@@ -55,13 +76,21 @@ function check_lrp_compat(model::Chain; verbose=true)
             display(_MD_CHECK_FAILED)
             println()
         end
-        error("Unknown layer or activation function found in model")
+        error("Unsupported layer, activation function, or connection found in model")
     end
     return true
 end
 
 function print_lrp_model_check(io::IO, model::DataflowLayer, indent::Int=0)
-    println(io, "  "^indent, nameof(typeof(model)), "(")
+    print(io, "  "^indent, nameof(typeof(model)), "(")
+    if !lrp_check_connection(model)
+        printstyled(
+            io,
+            " => unsupported connection `$(model.connection)`, LRP assumes `+`";
+            color=:red,
+        )
+    end
+    println(io)
     for layer in children_layers(model)
         print_lrp_model_check(io, layer, indent + 1)
     end
@@ -103,6 +132,8 @@ _MD_CHECK_FAILED = md"""# LRP model check failed
 
     LRP assumes that the model is a deep rectifier network
     that only contains ReLU-like activation functions.
+    `Parallel` and `SkipConnection` layers must combine their branches
+    additively (`connection = +`).
 
     If you think the missing layer should be supported by default,
     **please [submit an issue](https://github.com/Julia-XAI/RelevancePropagation.jl/issues)**.

@@ -3,7 +3,9 @@ using Test
 using Lux
 using Random: AbstractRNG
 using StableRNGs: StableRNG
-using RelevancePropagation.ModelSurgeon: canonize, canonize_fuse, split_activation
+using RelevancePropagation: ModelSurgeon # RP exports a conflicting `canonize`
+using RelevancePropagation.ModelSurgeon: canonize_fuse, split_activation
+using Functors: KeyPath
 
 # Also usable as a Lux `init_*` function
 pseudorand(rng::AbstractRNG, dims...) = rand(rng, Float32, dims...)
@@ -81,7 +83,7 @@ model = Chain(
 )
 ps, st = Lux.setup(StableRNG(123), model)
 st = collect_stats(model, ps, st, x)
-model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
+model_canonized, ps_canonized, st_canonized = ModelSurgeon.canonize(model, ps, st)
 
 # 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 9 # 15 - 6
@@ -104,7 +106,7 @@ model = Chain(
 )
 ps, st = Lux.setup(StableRNG(123), model)
 st = collect_stats(model, ps, st, x)
-model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
+model_canonized, ps_canonized, st_canonized = ModelSurgeon.canonize(model, ps, st)
 
 # 4 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 4
@@ -135,7 +137,7 @@ model = Chain(
 )
 ps, st = Lux.setup(StableRNG(123), model)
 st = collect_stats(model, ps, st, x)
-model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
+model_canonized, ps_canonized, st_canonized = ModelSurgeon.canonize(model, ps, st)
 
 @test length(model_canonized) == 3
 parallel_canonized = model_canonized[2]
@@ -180,7 +182,7 @@ model = Chain(
 )
 ps, st = Lux.setup(StableRNG(123), model)
 st = collect_stats(model, ps, st, x)
-model_canonized, ps_canonized, st_canonized = canonize(model, ps, st)
+model_canonized, ps_canonized, st_canonized = ModelSurgeon.canonize(model, ps, st)
 
 @test length(model_canonized) == 7
 
@@ -240,3 +242,31 @@ ln_split, ps_split, st_split = split_activation(ln, ps, st)
 @test ln_split[2] isa Scale
 @test ln_split[2].activation == relu
 @test first(Lux.apply(ln_split, x, ps_split, st_split)) ≈ first(Lux.apply(ln, x, ps, st))
+
+#=========================================#
+# `exclude` keeps layers out of the fuse pass #
+#=========================================#
+
+# Excluded layers are neither fused with their neighbors nor recursed into,
+# both in `canonize_fuse` and in the full `canonize` pipeline.
+let model = Chain(Dense(2 => 2), BatchNorm(2))
+    ps, st = Lux.setup(StableRNG(123), model)
+    @test length(first(canonize_fuse(model, ps, st))) == 1 # fuses by default
+
+    keep_dense(kp, l) = l isa Dense
+    keep_bn(kp, l) = l isa BatchNorm
+    @test length(first(canonize_fuse(model, ps, st; exclude=keep_dense))) == 2
+    @test length(first(canonize_fuse(model, ps, st; exclude=keep_bn))) == 2
+    @test length(first(ModelSurgeon.canonize(model, ps, st; exclude=keep_dense))) == 2
+end
+
+# Fusion inside an excluded sub-model is skipped; KeyPaths passed to `exclude`
+# follow the structure of the model passed to `canonize_fuse`.
+let model = Chain(Chain(Dense(2 => 2), BatchNorm(2)))
+    ps, st = Lux.setup(StableRNG(123), model)
+    @test length(first(canonize_fuse(model, ps, st)).layers.layer_1) == 1
+
+    keep_inner(kp, l) = kp == KeyPath(:layer_1)
+    kept = first(canonize_fuse(model, ps, st; exclude=keep_inner))
+    @test length(kept.layers.layer_1) == 2
+end

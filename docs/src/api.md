@@ -29,6 +29,7 @@ Refer to the [LRP rule overview](@ref rules) for a detailed explanation
 of the notation used for LRP rules.
 
 ```@docs
+AbstractLRPRule
 ZeroRule
 EpsilonRule
 GammaRule
@@ -50,6 +51,10 @@ lrp_rules
 ```
 
 ### [Composite primitives](@id api-composite-primitives)
+```@docs
+AbstractCompositePrimitive
+```
+
 #### Mapping layers to rules
 Composite primitives that apply a single rule:
 ```@docs
@@ -77,7 +82,7 @@ FirstNTypeMap
 ```
 
 #### Union types for composites
-The following exported union types types can be used to define TypeMaps:
+The following exported union types can be used to define TypeMaps:
 ```@docs
 ConvLayer
 PoolingLayer
@@ -109,6 +114,7 @@ RelevancePropagation.is_compatible
 ```
 Compatibility settings:
 ```@docs
+LRP_CONFIG
 LRP_CONFIG.supports_layer
 LRP_CONFIG.supports_activation
 ```

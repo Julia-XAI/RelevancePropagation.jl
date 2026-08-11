@@ -52,6 +52,12 @@ Rules are assigned to layers by passing either
 - a [`Composite`](@ref), which assigns rules based on layer type and position.
 If no rules are passed, [`ZeroRule`](@ref) is used on all layers.
 
+Nested `Chain` and `Parallel` layers take a nested `NamedTuple` of rules
+mirroring their children; a single rule assigned to such a sub-model instead
+treats it as one unit, differentiating through the entire sub-model at once.
+A single rule assigned to a `SkipConnection` applies to the wrapped layer,
+after relevance has been distributed between the skip and wrapped branches.
+
 # Keyword arguments
 - `normalize_output_relevance`: Selects whether output relevance should be set to 1 before applying LRP backward pass.
     Defaults to `true` to match literature. If `false`, values of output activations are used.

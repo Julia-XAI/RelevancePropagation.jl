@@ -127,3 +127,24 @@ end
     ratio = first(v1) / first(v2)
     @test v1 ≈ v2 * ratio
 end
+
+@testset "Relevance conservation (bias-free)" begin
+    # Without bias terms, LRP-0 conserves relevance exactly (up to the
+    # denominator stabilizer) — a tight invariant on the Enzyme backward pass.
+    # Bias absorption, the only other source of deviation, is covered by the
+    # looser check in "Normalized output relevance" (see TODO.md).
+    model_nb = Chain(
+        Conv((3, 3), 3 => 8, relu; pad=1, use_bias=false),
+        Conv((3, 3), 8 => 8, relu; pad=1, use_bias=false),
+        MaxPool((2, 2)),
+        Conv((3, 3), 8 => 16, relu; pad=1, use_bias=false),
+        Conv((3, 3), 16 => 16, relu; pad=1, use_bias=false),
+        MaxPool((2, 2)),
+        FlattenLayer(),
+        Dense(1024 => 512, relu; use_bias=false),
+        Dense(512 => 100, relu; use_bias=false),
+    )
+    ps_nb, st_nb = Lux.setup(StableRNG(123), model_nb)
+    expl = analyze(input, LRP(model_nb, ps_nb, st_nb))
+    @test isapprox(sum(expl.val), 1, atol=1e-4)
+end

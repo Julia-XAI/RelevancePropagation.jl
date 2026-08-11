@@ -20,11 +20,14 @@ function are split into a normalization-only LayerNorm followed by a
 
 The `exclude` and `unwrap` keyword arguments are documented in
 [`flatten_model`](@ref); excluded layers are kept intact by all three passes.
+Note that the fuse pass runs after flattening, so `KeyPath`-based `exclude`
+predicates see the re-keyed `layer_1, ..., layer_N` paths during fusion
+(see [`canonize_fuse`](@ref)).
 """
 function canonize(model, ps, st; exclude=Returns(false), unwrap=Returns(false))
     split_model, split_ps, split_st = canonize_split(model, ps, st; exclude)
     flat = flatten_model(split_model, split_ps, split_st; exclude, unwrap)
-    return canonize_fuse(flat...)
+    return canonize_fuse(flat...; exclude)
 end
 
 #==============#
@@ -85,6 +88,9 @@ function split_activation(l::LayerNorm, ps, st)
         scale_ps = (; weight=reshape(ps.scale, l.shape), bias=reshape(ps.bias, l.shape))
     else # LayerNorm contains no affine transformation, only an activation
         scale = Scale(l.shape, l.activation; use_bias=false)
+        # There are no parameters to take an eltype from (`ps` is empty), so
+        # match Lux's default initializer eltype; broadcasting promotes the
+        # unit weight in f64 models.
         scale_ps = (; weight=ones(Float32, l.shape))
     end
     split = Chain(norm, scale)
@@ -98,7 +104,7 @@ end
 #=============#
 
 """
-    canonize_fuse(model, ps, st)
+    canonize_fuse(model, ps, st; exclude)
 
 Fuse adjacent layers in all `Chain`s of a model wherever
 [`is_fuseable`](@ref) holds, using the five-argument
@@ -106,29 +112,55 @@ Fuse adjacent layers in all `Chain`s of a model wherever
 Returns a `(model, ps, st)` triple whose `Chain`s are re-keyed to
 `layer_1, ..., layer_N`.
 
+Layers for which `exclude(kp::KeyPath, layer)` returns `true` are kept
+intact: they are neither fused with their neighbors nor recursed into.
+The `KeyPath`s follow the structure of the model *passed to this function* —
+inside [`canonize`](@ref), that is the already-flattened model.
+
 [`is_fuseable`](@ref) and the five-argument `canonize_fuse` form the fusion
 extension API: to add fusions beyond Dense/Conv+BatchNorm, add methods for
 your own layer types (this is piracy-free).
 """
-function canonize_fuse(model::Chain, ps, st)
+function canonize_fuse(model, ps, st; exclude=Returns(false))
+    root = KeyPath()
+    exclude(root, model)::Bool && return model, ps, st
+    return _canonize_fuse(root, model, ps, st, exclude)
+end
+
+_canonize_fuse(kp::KeyPath, layer, ps, st, exclude) = layer, ps, st
+
+function _canonize_fuse(kp::KeyPath, model::Chain, ps, st, exclude)
     # Recursively canonize Parallel and SkipConnection layers first
-    layers, pss, sts = [], [], []
+    layers, pss, sts, excluded = [], [], [], Bool[]
     for k in keys(model.layers)
-        layer, p, s = canonize_fuse(model.layers[k], ps[k], st[k])
-        push!(layers, layer)
-        push!(pss, p)
-        push!(sts, s)
+        child = model.layers[k]
+        child_kp = KeyPath(kp, k)
+        if exclude(child_kp, child)::Bool
+            push!(layers, child)
+            push!(pss, ps[k])
+            push!(sts, st[k])
+            push!(excluded, true)
+        else
+            layer, p, s = _canonize_fuse(child_kp, child, ps[k], st[k], exclude)
+            push!(layers, layer)
+            push!(pss, p)
+            push!(sts, s)
+            push!(excluded, false)
+        end
     end
 
     i = 1
     while i < length(layers)
-        if is_fuseable(layers[i], layers[i + 1], sts[i + 1])
+        if !excluded[i] &&
+            !excluded[i + 1] &&
+            is_fuseable(layers[i], layers[i + 1], sts[i + 1])
             layers[i], pss[i] = canonize_fuse(
                 layers[i], pss[i], layers[i + 1], pss[i + 1], sts[i + 1]
             )
             deleteat!(layers, i + 1)
             deleteat!(pss, i + 1)
             deleteat!(sts, i + 1)
+            deleteat!(excluded, i + 1)
             # if fused, don't increment i,
             # instead try fusing the new layer with the next one
         else
@@ -140,19 +172,29 @@ function canonize_fuse(model::Chain, ps, st)
     return fused_model, NamedTuple{ks}(Tuple(pss)), NamedTuple{ks}(Tuple(sts))
 end
 
-function canonize_fuse(p::Parallel, ps, st)
+function _canonize_fuse(kp::KeyPath, p::Parallel, ps, st, exclude)
     ks = keys(p.layers)
-    triples = map(k -> canonize_fuse(p.layers[k], ps[k], st[k]), ks)
+    triples = map(ks) do k
+        child = p.layers[k]
+        child_kp = KeyPath(kp, k)
+        if exclude(child_kp, child)::Bool
+            (child, ps[k], st[k])
+        else
+            _canonize_fuse(child_kp, child, ps[k], st[k], exclude)
+        end
+    end
     layers = NamedTuple{ks}(map(first, triples))
     fused_ps = NamedTuple{ks}(map(t -> t[2], triples))
     fused_st = NamedTuple{ks}(map(t -> t[3], triples))
     return setproperties(p, (; layers)), fused_ps, fused_st
 end
-function canonize_fuse(s::SkipConnection, ps, st)
-    inner, fused_ps, fused_st = canonize_fuse(s.layers, ps, st)
+function _canonize_fuse(kp::KeyPath, s::SkipConnection, ps, st, exclude)
+    # `SkipConnection` is transparent in `ps`/`st` and adds no `KeyPath` key
+    # (consistent with `map_triple` and `flatten_model`).
+    exclude(kp, s.layers)::Bool && return s, ps, st
+    inner, fused_ps, fused_st = _canonize_fuse(kp, s.layers, ps, st, exclude)
     return setproperties(s, (; layers=inner)), fused_ps, fused_st
 end
-canonize_fuse(layer, ps, st) = layer, ps, st
 
 """
     is_fuseable(layer1, layer2, st2)

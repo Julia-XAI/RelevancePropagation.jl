@@ -13,5 +13,5 @@ Composite(
     ReshapeLayer             => PassRule(),
     NoOpLayer                => PassRule(),
     typeof(identity)         => PassRule(),
- ),
+  ),
 )

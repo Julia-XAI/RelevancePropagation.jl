@@ -9,7 +9,7 @@ using XAIBase: AbstractFeatureSelector, number_of_features
 using Lux: Chain, Parallel, SkipConnection
 using Lux: Dense, Scale, LayerNorm
 using Lux: NoOpLayer, WrappedFunction
-using Lux: apply, testmode
+using LuxCore: apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
 
 using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
 using Enzyme: Const, Duplicated, make_zero

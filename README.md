@@ -34,8 +34,10 @@ using Random
 
 # Load & prepare model
 model = Vision.VGG(16; pretrained=true)
-parameters, state = Lux.setup(Random.Xoshiro(0), model)          # pre-trained weights are loaded by setup
-model, parameters, state = flatten_model(model, parameters, state) # unwrap and flatten the model
+parameters, state = Lux.setup(Random.Xoshiro(0), model) # pre-trained weights are loaded by setup
+model, parameters, state = flatten_model(               # unwrap Boltz's model wrappers and flatten
+    model, parameters, state; unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)
+)
 
 # Load input
 url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")

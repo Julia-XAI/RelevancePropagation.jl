@@ -123,8 +123,8 @@ RelevancePropagation.layer_pullback
 with the input activation vector $a^k$, resulting in the relevance vector $R^k$.
 
 This AD-based implementation is used in RelevancePropagation.jl as the default method
-for all layer types that don't have a more optimized implementation
-(e.g. fully connected layers).
+for all combinations of rules and layer types
+that don't have a more specialized implementation.
 We will refer to it as the *"AD fallback"*.
 
 For more background information on automatic differentiation, refer to the 
@@ -136,13 +136,13 @@ The [`LRP`](@ref) analyzer struct holds the Lux triple of
 as well as the LRP `rules`, the model's `layers`, and pre-computed `modified_layers`.
 
 Since Lux separates a model from its parameters and states,
-layers are bundled into an internal wrapper type called `FrozenLayer`
+layers are bundled into an internal wrapper type called `StaticLayer`
 that holds a layer together with its `ps` and `st`.
-Calling a `FrozenLayer` applies the layer to an input
+Calling a `StaticLayer` applies the layer to an input
 and discards the updated layer states, since LRP is inference-only.
 
 ```@docs
-RelevancePropagation.FrozenLayer
+RelevancePropagation.StaticLayer
 ```
 
 As described in the section on [*Composites*](@ref composites),
@@ -211,7 +211,7 @@ the following implementation, which is the actual generic rule from `src/rules.j
 should be straightforward to understand:
 
 ```julia
-function lrp!(Rᵏ, rule::AbstractLRPRule, layer::FrozenLayer, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::AbstractLRPRule, layer::StaticLayer, modified_layer, aᵏ, Rᵏ⁺¹)
     layer = isnothing(modified_layer) ? layer : modified_layer
     ãᵏ = modify_input(rule, aᵏ)
     z, back = layer_pullback(layer, ãᵏ)
@@ -238,27 +238,31 @@ Using multiple dispatch, we can implement specialized versions of `lrp!` that no
 take into account the rule type, but also the layer type, 
 for example for fully connected layers or reshaping layers. 
 
-Reshaping layers don't affect attributions. We can therefore avoid the computational
-overhead of AD by writing a specialized implementation that simply reshapes back:
+Reshaping and dropout layers don't affect attributions.
+For rules that neither modify the input nor the denominator
+([`ZeroRule`](@ref) and [`EpsilonRule`](@ref)),
+we can therefore avoid the computational overhead of AD
+by writing specialized implementations that simply reshape back:
 ```julia
-function lrp!(Rᵏ, rule, layer::FrozenLayer{<:ReshapingLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::ZeroRule, layer::StaticLayer{<:ReshapingLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
     Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
 end
 ```
+RelevancePropagation.jl provides these specializations for `ZeroRule` and
+`EpsilonRule` on both `ReshapingLayer` and `DropoutLayer` types.
 
-We can even provide a specialized implementation of the generic LRP rule for `Dense` layers.
-Since we can access the weight matrix in the layer's parameters directly,
-we can skip automatic differentiation and compute the VJP $c = W^T s$
-using a plain matrix-vector product:
+Some rule–layer combinations don't require a VJP at all.
+The [`FlatRule`](@ref) distributes relevance uniformly over all input neurons
+connected to an output neuron, so for `Dense` layers, the input relevance can
+be written directly, skipping both the forward pass and AD:
 
 ```julia
-function lrp!(Rᵏ, rule, layer::FrozenLayer{<:Dense}, modified_layer, aᵏ, Rᵏ⁺¹)
-    # Use modified_layer if available
-    layer = isnothing(modified_layer) ? layer : modified_layer
-
-    ãᵏ = modify_input(rule, aᵏ)
-    z = modify_denominator(rule, layer(ãᵏ))
-    Rᵏ .= ãᵏ .* (layer.ps.weight' * (Rᵏ⁺¹ ./ z))
+function lrp!(Rᵏ, rule::FlatRule, layer::StaticLayer{<:Dense}, modified_layer, aᵏ, Rᵏ⁺¹)
+    n = size(Rᵏ, 1) # number of input neurons connected to each output neuron
+    for i in axes(Rᵏ, 2) # samples in batch
+        fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
+    end
+    return Rᵏ
 end
 ```
 
@@ -266,7 +270,7 @@ For maximum low-level control beyond `modify_input` and `modify_denominator`,
 you can also implement your own `lrp!` function and dispatch
 on individual rule types `MyRule` and layer types `MyLayer`:
 ```julia
-function lrp!(Rᵏ, rule::MyRule, layer::FrozenLayer{<:MyLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
+function lrp!(Rᵏ, rule::MyRule, layer::StaticLayer{<:MyLayer}, modified_layer, aᵏ, Rᵏ⁺¹)
     Rᵏ .= ...
 end
 ```

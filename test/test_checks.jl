@@ -7,7 +7,7 @@ using StableRNGs: StableRNG
 
 using RelevancePropagation: check_lrp_compat, print_lrp_model_check
 
-err = ErrorException("Unknown layer or activation function found in model")
+err = ErrorException("Unsupported layer, activation function, or connection found in model")
 
 # Lux layers
 unknown_function(x) = x
@@ -34,6 +34,25 @@ unknown_function(x) = x
         Dense(2 => 2), Parallel(+, Dense(2 => 2), Dense(2 => 2, relu)), Dense(2 => 2, relu)
     );
     verbose=false,
+)
+
+# The LRP backward pass assumes `Parallel` and `SkipConnection` branches are
+# combined additively; any other `connection` must be rejected.
+@test check_lrp_compat(
+    Chain(SkipConnection(Dense(2 => 2, relu), +), Dense(2 => 2)); verbose=false
+)
+@test_throws err check_lrp_compat(
+    Chain(Parallel(-, Dense(2 => 2), Dense(2 => 2)), Dense(2 => 2)); verbose=false
+)
+@test_throws err check_lrp_compat(
+    Chain(Parallel(vcat, Dense(2 => 2), Dense(2 => 2)), Dense(4 => 2)); verbose=false
+)
+@test_throws err check_lrp_compat(
+    Chain(SkipConnection(Dense(2 => 2, relu), vcat), Dense(4 => 2)); verbose=false
+)
+# ...also when nested inside supported containers
+@test_throws err check_lrp_compat(
+    Chain(Chain(Parallel(.*, Dense(2 => 2), Dense(2 => 2))), Dense(2 => 2)); verbose=false
 )
 
 # Lux wraps bare functions in a `Chain` in `WrappedFunction`;

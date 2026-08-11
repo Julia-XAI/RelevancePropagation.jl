@@ -36,8 +36,13 @@ Flux.jl models are no longer supported.
   exact: it uses the layer's running statistics and includes `epsilon`
   (v3 ignored it). `affine=false` BatchNorm and `use_bias=false` layers
   are handled.
-* ![Feature][badge-feature] `flatten_model` unwraps model wrappers such as
-  Boltz.jl's `Vision.VGG`.
+* ![Feature][badge-feature] `flatten_model` can unwrap model wrappers such as
+  Boltz.jl's `Vision.VGG` via the opt-in `unwrap` keyword argument, e.g.
+  `unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)`.
+* ![Bugfix][badge-bugfix] The LRP model checks now reject `Parallel` and
+  `SkipConnection` layers whose `connection` is not `+`. The LRP backward
+  pass assumes additive branch combination; previously, other connections
+  silently produced incorrect relevances.
 
 ## Version `v3.0.0`
 * ![BREAKING][badge-breaking] Update XAIBase interface to `v4`. 

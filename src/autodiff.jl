@@ -1,3 +1,5 @@
+# Named `StaticLayer` (not `FrozenLayer`) to avoid confusion with the unrelated
+# `Lux.Experimental.FrozenLayer`, which freezes *parameters* during training.
 """
     StaticLayer(layer, ps, st)
 
@@ -9,8 +11,6 @@ modified parameters are stored in new `StaticLayer` instances.
 Since `StaticLayer` is immutable and never differentiated w.r.t. its contents,
 it is safe to annotate it as `Enzyme.Const` in [`layer_pullback`](@ref).
 """
-# Named `StaticLayer` (not `FrozenLayer`) to avoid confusion with the unrelated
-# `Lux.Experimental.FrozenLayer`, which freezes *parameters* during training.
 struct StaticLayer{L,P,S}
     layer::L
     ps::P

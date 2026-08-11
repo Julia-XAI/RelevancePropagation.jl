@@ -120,7 +120,7 @@ function _show_primitive(io::IO, r::AbstractCompositeTypeMap, indent::Int=0)
     for (type, rule) in r.map
         _print_type_rule(io, type, rule, indent + 1, npad)
     end
-    println(io, " "^(indent), "),")
+    println(io, "  "^indent, "),")
 end
 
 function _print_type_rule(io::IO, type::Type, rule, indent::Int=0, npad=0)

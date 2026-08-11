@@ -52,7 +52,7 @@ const RULES = Dict(
     @test modified_layer.ps.bias == b
 
     R̂ᵏ = similar(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     ## Pooling layer
@@ -70,7 +70,7 @@ const RULES = Dict(
     @test modified_layer === layer # layers without weights are not modified
 
     R̂ᵏ = similar(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     ## Scale layer
@@ -84,7 +84,7 @@ const RULES = Dict(
     modified_layer = modify_layer(rule, layer)
 
     R̂ᵏ = similar(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -193,17 +193,17 @@ end
     R̂ᵏ = similar(aᵏ) # will be inplace updated
     rule = AlphaBetaRule(1.0f0, 0.0f0)
     modified_layers = modify_layer(rule, layer)
-    lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α1β0
 
     rule = AlphaBetaRule(2.0f0, 1.0f0)
     modified_layers = modify_layer(rule, layer)
-    lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α2β1
 
     rule = ZPlusRule()
     modified_layers = modify_layer(rule, layer)
-    lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α1β0
 end
 
@@ -241,7 +241,7 @@ end
     @test iszero(ml.layerʳ⁺.ps.bias)
 
     R̂ᵏ = similar(Rᵏ)
-    lrp!(R̂ᵏ, rule, layer, ml, a, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, ml, a, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -276,7 +276,7 @@ end
     # not canonized
     modified_layer = modify_layer(rule, layer)
     R̂ᵏ = similar(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: LayerNorm splits into normalization and affine Scale part
@@ -291,8 +291,8 @@ end
     aₙ = layer_1(aᵏ) # activation after the normalization-only part
     R = similar(aₙ) # relevance at the normalization output
 
-    lrp!(R, ZeroRule(), layer_2, modified_layer_2, aₙ, Rᵏ⁺¹)
-    lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
+    @inferred lrp!(R, ZeroRule(), layer_2, modified_layer_2, aₙ, Rᵏ⁺¹)
+    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
     @test R̂ᵏ ≈ Rᵏ
 
     ############################
@@ -305,7 +305,7 @@ end
     # not canonized
     modified_layer = modify_layer(rule, layer)
     R̂ᵏ = similar(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: a LayerNorm without affine part and activation stays unsplit
@@ -316,7 +316,7 @@ end
     modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
 
     R̂ᵏ = zero(aᵏ)
-    lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
+    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
     @test R̂ᵏ ≈ Rᵏ
 
     ######################################
@@ -329,7 +329,7 @@ end
     # not canonized
     modified_layer = modify_layer(rule, layer)
     R̂ᵏ = zero(aᵏ) # will be inplace updated
-    lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: splits into normalization and a bias-free Scale carrying relu
@@ -344,8 +344,8 @@ end
     aₙ = layer_1(aᵏ)
     Rₙ = similar(aₙ)
 
-    lrp!(Rₙ, ZeroRule(), layer_2, modified_layer_2, aₙ, R)
-    lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, Rₙ)
+    @inferred lrp!(Rₙ, ZeroRule(), layer_2, modified_layer_2, aₙ, R)
+    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, Rₙ)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -379,8 +379,8 @@ end
     @test modified_layer.ps.weight ≈ [0.0 -1.0; 0.0 0.0]
     @test modified_layer.ps.bias ≈ [0.0, 0.0]
 
-    W = modify_weight(rule, W)
-    b = modify_bias(rule, b)
+    W = @inferred modify_weight(rule, W)
+    b = @inferred modify_bias(rule, b)
     @test W ≈ [1.42 -1.0; 2.84 0.0]
     @test b ≈ [-1.0, 1.42]
 

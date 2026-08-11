@@ -4,7 +4,7 @@ using Test
 using RelevancePropagation: StaticLayer, activation_fn
 using RelevancePropagation: has_weight, has_bias
 using RelevancePropagation: check_output_softmax
-using RelevancePropagation: stabilize_denom, drop_batch_index, masked_copy
+using RelevancePropagation: stabilize_denom, masked_copy
 
 using Lux
 using LuxCore: AbstractLuxWrapperLayer
@@ -41,14 +41,6 @@ S = @inferred stabilize_denom(A, 1e-3)
 @test S ≈ [1.001 1e-3 1e-3; -1.001 1e-3 -1e-3]
 S = @inferred stabilize_denom(Float32.(A), 1e-2)
 @test S ≈ [1.01 1.0f-2 1.0f-2; -1.01 1.0f-2 -1.0f-2]
-
-# drop_batch_index
-I1 = CartesianIndex(5, 3, 2)
-I2 = @inferred drop_batch_index(I1)
-@test I2 == CartesianIndex(5, 3)
-I1 = CartesianIndex(5, 3, 2, 6)
-I2 = @inferred drop_batch_index(I1)
-@test I2 == CartesianIndex(5, 3, 2)
 
 # masked_copy
 A    = [4  9  9; 9  6  9; 1  7  8]

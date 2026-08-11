@@ -105,6 +105,12 @@ zip_layers(f, layer, x) = f(layer, x)
 # Rule primitives #
 #=================#
 
+"""
+    AbstractCompositePrimitive
+
+Abstract supertype of all composite primitives.
+See [`Composite`](@ref) for a list of all available primitives.
+"""
 abstract type AbstractCompositePrimitive end
 abstract type AbstractCompositeMap <: AbstractCompositePrimitive end
 

@@ -15,10 +15,10 @@ Composite(
     GlobalMeanPool   => EpsilonRule{Float32}(1.0f-6),
     MaxPool          => EpsilonRule{Float32}(1.0f-6),
     MeanPool         => EpsilonRule{Float32}(1.0f-6),
- ),
+  ),
   FirstNTypeMap(  # layers 1:7
     Conv => FlatRule(),
- ),
+  ),
   RangeTypeMap(  # layers 4:10
     AdaptiveMaxPool  => EpsilonRule{Float32}(1.0f-5),
     AdaptiveMeanPool => EpsilonRule{Float32}(1.0f-5),
@@ -26,7 +26,7 @@ Composite(
     GlobalMeanPool   => EpsilonRule{Float32}(1.0f-5),
     MaxPool          => EpsilonRule{Float32}(1.0f-5),
     MeanPool         => EpsilonRule{Float32}(1.0f-5),
- ),
+  ),
   LayerMap( # layer KeyPath(:layer_9,)
     AlphaBetaRule{Float32}(1.0f0, 0.0f0)
   ),
