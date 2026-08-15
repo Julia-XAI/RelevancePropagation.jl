@@ -4,45 +4,37 @@
 This release rewrites the package from Flux.jl/Zygote.jl to
 [Lux.jl](https://lux.csail.mit.edu) and
 [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl).
-Zygote.jl is unmaintained, and Lux's explicit-parameter design is the model
-framework with first-class Enzyme support.
+Zygote.jl is unmaintained, and Lux's explicit-parameter design is the model framework with first-class Enzyme support.
 Flux.jl models are no longer supported.
 
-* ![BREAKING][badge-breaking] The API follows Lux's separation of a model
-  from its parameters and states, as returned by `Lux.setup`:
+* ![BREAKING][badge-breaking] The API follows Lux's separation of a model from its parameters and states, 
+  as returned by `Lux.setup`:
   `LRP` analyzers are constructed via `LRP(model, params, states[, rules])`,
-  and the model transformations `flatten_model` and `canonize` take and
-  return `(model, params, states)`. `strip_softmax` takes and returns only
-  the model.
-* ![BREAKING][badge-breaking] Rules for nested models are assigned as
-  `NamedTuple`s mirroring the nested structure of the model.
+  and the model transformations `flatten_model` and `canonize` take and return `(model, params, states)`. 
+  `strip_softmax` takes and returns only the model.
+* ![BREAKING][badge-breaking] Rules for nested models are assigned as `NamedTuple`s mirroring the nested structure of the model.
   `ChainTuple`, `ParallelTuple` and `SkipConnectionTuple` were removed.
   A plain `AbstractVector` of rules is still accepted for flat models.
-* ![BREAKING][badge-breaking] The `LRP` constructor no longer flattens models
-  automatically and the `flatten` keyword argument was removed.
+* ![BREAKING][badge-breaking] The `LRP` constructor no longer flattens models automatically 
+  and the `flatten` keyword argument was removed.
   Call `flatten_model` explicitly.
 * ![BREAKING][badge-breaking] `LayerMap` addresses layers by
-  `Functors.KeyPath` instead of `ModelIndex`. Integers and tuples of
-  integers are converted for convenience.
-* ![BREAKING][badge-breaking] Custom layers must subtype
-  `Lux.AbstractLuxLayer` and follow the Lux layer interface.
-* ![BREAKING][badge-breaking] GPU support is untested in this release.
+  `Functors.KeyPath` instead of `ModelIndex`. 
+  Integers and tuples of integers are converted for convenience.
+* ![BREAKING][badge-breaking] Custom layers must subtype `Lux.AbstractLuxLayer` and follow the Lux layer interface.
 * ![BREAKING][badge-breaking] Lux `LayerNorm` differs from Flux `LayerNorm`:
-  its default `dims=Colon()` normalizes over all dimensions including the
-  batch dimension, and epsilon is placed inside the square root
-  (`(x - μ) / √(σ² + ϵ)`). `LayerNormRule` follows the layer's configuration,
-  so relevances for "the same" architecture can differ from v3.
-* ![Enhancement][badge-enhancement] BatchNorm fusion in `canonize` is now
-  exact: it uses the layer's running statistics and includes `epsilon`
-  (v3 ignored it). `affine=false` BatchNorm and `use_bias=false` layers
-  are handled.
-* ![Feature][badge-feature] `flatten_model` can unwrap model wrappers such as
-  Boltz.jl's `Vision.VGG` via the opt-in `unwrap` keyword argument, e.g.
-  `unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)`.
-* ![Bugfix][badge-bugfix] The LRP model checks now reject `Parallel` and
-  `SkipConnection` layers whose `connection` is not `+`. The LRP backward
-  pass assumes additive branch combination; previously, other connections
-  silently produced incorrect relevances.
+  its default `dims=Colon()` normalizes over all dimensions including the batch dimension, 
+  and epsilon is placed inside the square root (`(x - μ) / √(σ² + ϵ)`). 
+  `LayerNormRule` follows the layer's configuration, so relevances for "the same" architecture can differ from v3.
+* ![Enhancement][badge-enhancement] BatchNorm fusion in `canonize` is now exact: 
+  it uses the layer's running statistics and includes `epsilon`
+  (v3 ignored it). 
+  `affine=false` BatchNorm and `use_bias=false` layers are handled.
+* ![Feature][badge-feature] `flatten_model` can unwrap model wrappers such as Boltz.jl's `Vision.VGG` via the opt-in `unwrap` keyword argument, 
+  e.g. `unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)`.
+* ![Bugfix][badge-bugfix] The LRP model checks now reject `Parallel` and `SkipConnection` layers whose `connection` is not `+`. 
+  The LRP backward pass assumes additive branch combination; previously, 
+  other connections silently produced incorrect relevances.
 
 ## Version `v3.0.0`
 * ![BREAKING][badge-breaking] Update XAIBase interface to `v4`. 
