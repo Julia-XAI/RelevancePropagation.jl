@@ -268,3 +268,4 @@ for R in (
         return lrp_skip_connection!(Rᵏ, rules, sc, modified, aᵏ, Rᵏ⁺¹)
     end
 end
+# ISSUE: is this just an issue due to the existance of the `StaticLayer` wrapper?

@@ -221,6 +221,7 @@ function canonize_fuse(layer::Union{Dense,Conv}, ps_layer, bn::BatchNorm, ps_bn,
     μ, σ² = st_bn.running_mean, st_bn.running_var
     γ = haskey(ps_bn, :scale) ? ps_bn.scale : one.(μ)  # BatchNorm(...; affine=false)
     β = haskey(ps_bn, :bias) ? ps_bn.bias : zero.(μ)
+    # ISSUE: can't we use `ones` and `zeros` here?
     scale = γ ./ sqrt.(σ² .+ bn.epsilon)
 
     weight = fuse_weight(layer, ps_layer.weight, scale)

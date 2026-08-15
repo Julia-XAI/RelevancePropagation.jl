@@ -81,6 +81,8 @@ end
 # keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_2))            -> false
 # keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1, :layer_2))  -> true
 # keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))            -> false
+
+# ISSUE: what are KeyPath and why do they have such long `Symbol` names if these are essentially just integer indices?
 function keypath_in(a::KeyPath, b::KeyPath)
     length(a) < length(b) && return false
     return all(a[i] == b[i] for i in 1:length(b))

@@ -51,6 +51,7 @@ LRP(model_flat, ps_flat, st_flat, rules)
 # the same structure Lux uses for `ps` and `st`:
 rules = (;
     layer_1=(;
+    # ISSUE: are these names needed? In this example, they don't seem to carry any additional information.
         layer_1=FlatRule(),
         layer_2=ZPlusRule(),
         layer_3=ZeroRule(),

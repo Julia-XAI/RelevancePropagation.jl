@@ -17,6 +17,7 @@ struct StaticLayer{L,P,S}
     st::S
 end
 (f::StaticLayer)(x) = first(apply(f.layer, x, f.ps, f.st))
+# ISSUE: I don't yet fully understand why this is needed. Use Lux and Zygote natively and ideomatically instead of trying to force Flux+Zygote like behavior.
 
 Base.show(io::IO, f::StaticLayer) = print(io, "StaticLayer(", f.layer, ")")
 
@@ -62,6 +63,8 @@ Rules that need VJPs with several seeds through the same layer
 construct one pullback per seed.
 """
 function layer_pullback(f::F, x::AbstractArray) where {F<:StaticLayer}
+    # ISSUE: this function is the biggest code smell in the entire PR.
+    # Try to understand how LRP relates to AD and implement this from scratch in ideomatic Lux+Enzyme.
     fwd, rev = autodiff_thunk(
         ReverseSplitWithPrimal, Const{F}, Duplicated, Duplicated{typeof(x)}
     )

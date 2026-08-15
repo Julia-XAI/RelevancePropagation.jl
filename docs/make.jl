@@ -47,10 +47,7 @@ makedocs(;
     linkcheck_ignore=[
         r"https://link.springer.com/chapter/10.1007/978-3-030-28954-6_10",
         r"https://www.nature.com/articles/s42256-023-00711-8",
-        # TODO: remove once the Lux/Enzyme port (PR #24) is merged: until then
-        # `src/autodiff.jl` only exists on `ah/enzyme`, so its link 404s on
-        # `main` (and the sibling `src/rules.jl` link is prone to GitHub 429
-        # rate-limit responses in CI).
+        # TODO: remove once PR #24 is merged.
         r"https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/.*\.jl",
     ],
     warnonly=[:missing_docs],

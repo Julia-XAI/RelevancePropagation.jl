@@ -89,7 +89,7 @@ The vector $c$ computed in step 3 corresponds to $c = s^T W$,
 a so-called *Vector-Jacobian-Product* (VJP) of the vector $s$ with the Jacobian $W$. 
 
 VJPs are the fundamental building blocks of reverse-mode automatic differentiation (AD),
-and therefore implemented by most AD frameworks in a highly performant, matrix-free manner.
+and therefore implemented by most AD frameworks in a highly performant, matrix-free, GPU-accelerated manner.
 Note that computing the VJP is much more efficient than first computing the full Jacobian
 $W$ and later multiplying it with $s$. 
 This is due to the fact that computing the full Jacobian of a function 
@@ -100,12 +100,14 @@ All Enzyme-specific code is contained in the file
 [`/src/autodiff.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/autodiff.jl),
 which implements the internal helper function `layer_pullback`.
 It returns the output $z$ of a layer alongside a function `back`,
+<!-- ISSUE: this is a direct port of Zygote functionality to Enzyme. Reverse-pass should instead be implemented in more ideomatic Enzyme. -->
 commonly called a *pullback*, that computes the VJP for a given seed $s$:
 
 ```julia
 z, back = layer_pullback(modified_layer, aᵏ)
 c = back(s)
 ```
+<!-- ISSUE: this is a direct port of Zygote functionality to Enzyme. Reverse-pass should instead be implemented in more ideomatic Enzyme. -->
 
 Enzyme's *split mode* is used to separate the forward pass (computing $z$)
 from the reverse pass (computing the VJP),
@@ -140,6 +142,7 @@ layers are bundled into an internal wrapper type called `StaticLayer`
 that holds a layer together with its `ps` and `st`.
 Calling a `StaticLayer` applies the layer to an input
 and discards the updated layer states, since LRP is inference-only.
+<!-- ISSUE: is this really needed? This doesn't sound like the ideomatic way to use Enzyme and Lux. -->
 
 ```@docs
 RelevancePropagation.StaticLayer
@@ -175,7 +178,7 @@ and writing relevances $R^k$ into the pre-allocated array `Rs`:
 
 ```julia
 for k in length(layers):-1:1
-    #                  └─ loop over layers in reverse
+    #                   └─ loop over layers in reverse
     lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k+1])
     #    └─ Rᵏ: modified in-place                        └─ aᵏ  └─ Rᵏ⁺¹
 end
@@ -214,7 +217,7 @@ should be straightforward to understand:
 function lrp!(Rᵏ, rule::AbstractLRPRule, layer::StaticLayer, modified_layer, aᵏ, Rᵏ⁺¹)
     layer = isnothing(modified_layer) ? layer : modified_layer
     ãᵏ = modify_input(rule, aᵏ)
-    z, back = layer_pullback(layer, ãᵏ)
+    z, back = layer_pullback(layer, ãᵏ) # ISSUE: use ideamatic Zygote
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
     c = back(s)
     Rᵏ .= ãᵏ .* c

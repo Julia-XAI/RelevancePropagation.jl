@@ -152,6 +152,7 @@ function modify_layer(rule, layer::StaticLayer; keep_bias=true)
     ps = merge(layer.ps, modified_ps)
     return StaticLayer(remove_activation(layer.layer), ps, layer.st)
 end
+# ISSUE: is this even needed if Lux separates layers and parameters? This feels like a left-over from the Flux code and non-ideomatic in Lux. You introduced `StaticLayer` to bundle layers and parameters (which I don't think was needed), and here you try to distangle your own entanglement.
 
 # Useful presets, used e.g. in AlphaBetaRule, ZBoxRule & ZPlusRule:
 modify_parameters(::Val{:keep_positive}, p) = keep_positive(p)
