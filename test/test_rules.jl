@@ -2,12 +2,14 @@ using RelevancePropagation
 using Test
 using ReferenceTests
 
-using RelevancePropagation: StaticLayer, lrp!, modify_input, modify_denominator
-using RelevancePropagation: is_compatible, modify_layer, modify_weight, modify_bias
-using RelevancePropagation: modify_parameters
+using RelevancePropagation: propagate, node_forward, rule_layer, modify_params
+using RelevancePropagation: modify_input, modify_denominator
+using RelevancePropagation: is_compatible, modify_weight, modify_bias
+using RelevancePropagation: modify_parameters, NegativeGammaRule
 using RelevancePropagation: activation_fn
 using RelevancePropagation: stabilize_denom
 using Lux
+using LuxCore: LuxCore
 using LinearAlgebra: I
 using Random: randn
 using StableRNGs: StableRNG
@@ -16,10 +18,8 @@ using StableRNGs: StableRNG
 T = Float32
 pseudorandn(dims...) = randn(StableRNG(123), T, dims...)
 
-function static_testmode(layer)
-    ps, st = Lux.setup(StableRNG(123), layer)
-    return StaticLayer(layer, ps, Lux.testmode(st))
-end
+forward(layer, ps, st, x) = first(LuxCore.apply(layer, x, ps, st))
+setup_testmode(layer) = (l=Lux.setup(StableRNG(123), layer); (l[1], Lux.testmode(l[2])))
 
 const RULES = Dict(
     "ZeroRule"             => ZeroRule(),
@@ -45,14 +45,14 @@ const RULES = Dict(
     b = [7.0, 8.0]
     Rᵏ = reshape([17 / 90, 316 / 675], 2, 1) # expected output
 
-    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
-    modified_layer = modify_layer(rule, layer)
-    @test activation_fn(modified_layer) == identity
-    @test modified_layer.ps.weight == W
-    @test modified_layer.ps.bias == b
+    layer = Dense(2 => 2, relu)
+    ps = (; weight=W, bias=b)
+    st = NamedTuple()
+    @test activation_fn(rule_layer(layer)) == identity
+    @test modify_params(rule, ps) === ps # ZeroRule doesn't modify parameters
 
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     ## Pooling layer
@@ -65,12 +65,12 @@ const RULES = Dict(
     aᵏ = reshape(repeat(aᵏ, 1, 3), 3, 3, 3, 1)
     Rᵏ = reshape(repeat(Rᵏ, 1, 3), 3, 3, 3, 1)
 
-    layer = static_testmode(MaxPool((2, 2); stride=(1, 1)))
-    modified_layer = modify_layer(rule, layer)
-    @test modified_layer === layer # layers without weights are not modified
+    layer = MaxPool((2, 2); stride=(1, 1))
+    ps, st = setup_testmode(layer)
+    @test rule_layer(layer) === layer # layers without weights are not modified
 
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     ## Scale layer
@@ -80,39 +80,37 @@ const RULES = Dict(
     b = [1.0, -3.0]
     Rᵏ = reshape([2 / 3, 8 / 3], 2, 1) # expected output
 
-    layer = StaticLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
-    modified_layer = modify_layer(rule, layer)
+    layer = Scale(2, relu)
+    ps = (; weight=w, bias=b)
+    st = NamedTuple()
 
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
-@testset "modify_layer" begin
+@testset "modify_params" begin
     W = [1.0 -1.0; 2.0 0.0]
     b = [-1.0, 1.0]
-    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
+    ps = (; weight=W, bias=b)
 
-    # ZeroRule and EpsilonRule don't modify parameters
+    # ZeroRule and EpsilonRule don't modify parameters,
+    # signalled by returning `ps` itself
     for rule in (ZeroRule(), EpsilonRule())
-        modified_layer = modify_layer(rule, layer)
-        @test modified_layer.ps.weight == W
-        @test modified_layer.ps.bias == b
-        @test activation_fn(modified_layer) == identity
+        @test modify_params(rule, ps) === ps
     end
+    # Rules propagate through the activation-stripped layer
+    @test activation_fn(rule_layer(Dense(2 => 2, relu))) == identity
 
     # keep_bias=false zeroes the bias
-    modified_layer = modify_layer(ZeroRule(), layer; keep_bias=false)
-    @test modified_layer.ps.weight == W
-    @test iszero(modified_layer.ps.bias)
+    ρps = modify_params(ZeroRule(), ps; keep_bias=false)
+    @test ρps.weight == W
+    @test iszero(ρps.bias)
 
-    # Layers without bias parameters stay bias-free
-    layer_nobias = StaticLayer(
-        Dense(2 => 2, relu; use_bias=false), (; weight=W), NamedTuple()
-    )
-    modified_layer = modify_layer(ZeroRule(), layer_nobias)
-    @test modified_layer.ps.weight == W
-    @test !haskey(modified_layer.ps, :bias)
+    # Parameters without bias entries stay bias-free
+    ρps = modify_params(ZeroRule(), (; weight=W); keep_bias=false)
+    @test ρps.weight == W
+    @test !haskey(ρps, :bias)
 end
 
 @testset "EpsilonRule denominator" begin
@@ -183,27 +181,22 @@ end
     aᵏ = [1.0f0, 1.0f0]
     W = [1.0f0 -1.0f0]
     b = [-1.0f0]
-    layer = StaticLayer(Dense(2 => 1), (; weight=W, bias=b), NamedTuple())
-    Rᵏ⁺¹ = layer(aᵏ)
+    layer = Dense(2 => 1)
+    ps = (; weight=W, bias=b)
+    st = NamedTuple()
+    zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
 
     # Expected outputs
     Rᵏ_α1β0 = [-1.0f0, 0.0f0]
     Rᵏ_α2β1 = [-2.0f0, 0.5f0]
 
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    rule = AlphaBetaRule(1.0f0, 0.0f0)
-    modified_layers = modify_layer(rule, layer)
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(AlphaBetaRule(1.0f0, 0.0f0), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α1β0
 
-    rule = AlphaBetaRule(2.0f0, 1.0f0)
-    modified_layers = modify_layer(rule, layer)
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(AlphaBetaRule(2.0f0, 1.0f0), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α2β1
 
-    rule = ZPlusRule()
-    modified_layers = modify_layer(rule, layer)
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(ZPlusRule(), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ_α1β0
 end
 
@@ -213,11 +206,14 @@ end
     a⁻ = [-1.0, 0.0]
     W = [1.0 -4.0; 2.0 0.0]
     b = [-2.0, 3.0]
-    layer = StaticLayer(Dense(2 => 2, leakyrelu), (; weight=W, bias=b), NamedTuple()) # leakyrelu defaults to a=0.01
+    layer = Dense(2 => 2, leakyrelu) # leakyrelu defaults to a=0.01
+    ps = (; weight=W, bias=b)
+    st = NamedTuple()
     Rᵏ⁺¹ = [-0.07; 1.0]
     Rᵏ⁺¹⁺ = [0.0; 1.0]
     Rᵏ⁺¹⁻ = [-0.07; 0.0]
-    @test Rᵏ⁺¹ ≈ layer(a)
+    zᵏ, y = node_forward(layer, a, ps, st)
+    @test Rᵏ⁺¹ ≈ y
 
     W⁺ = [1.25 -4.0; 2.5 0.0] # W + γW⁺
     b⁺ = [-2.0, 3.75]         # b + γb⁺
@@ -230,18 +226,21 @@ end
         a⁻ .* (transpose(W⁻) * sˡ + transpose(W⁺) * sʳ)
 
     rule = GeneralizedGammaRule(0.25)
-    ml = modify_layer(rule, layer)
-    @test ml.layerˡ⁺.ps.weight == W⁺
-    @test ml.layerˡ⁻.ps.weight == W⁻
-    @test ml.layerʳ⁻.ps.weight == W⁻
-    @test ml.layerʳ⁺.ps.weight == W⁺
-    @test ml.layerˡ⁺.ps.bias == b⁺
-    @test ml.layerʳ⁻.ps.bias == b⁻
-    @test iszero(ml.layerˡ⁻.ps.bias)
-    @test iszero(ml.layerʳ⁺.ps.bias)
+    # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation
+    psˡ⁺ = modify_params(GammaRule(0.25), ps)
+    psˡ⁻ = modify_params(NegativeGammaRule(0.25), ps; keep_bias=false)
+    psʳ⁻ = modify_params(NegativeGammaRule(0.25), ps)
+    psʳ⁺ = modify_params(GammaRule(0.25), ps; keep_bias=false)
+    @test psˡ⁺.weight == W⁺
+    @test psˡ⁻.weight == W⁻
+    @test psʳ⁻.weight == W⁻
+    @test psʳ⁺.weight == W⁺
+    @test psˡ⁺.bias == b⁺
+    @test psʳ⁻.bias == b⁻
+    @test iszero(psˡ⁻.bias)
+    @test iszero(psʳ⁺.bias)
 
-    R̂ᵏ = similar(Rᵏ)
-    @inferred lrp!(R̂ᵏ, rule, layer, ml, a, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(rule, layer, a, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -271,81 +270,61 @@ end
     ###################
     # relu activation #
     ###################
-    layer = StaticLayer(LayerNorm((2, 2), relu; epsilon=0.0f0), ps_affine, NamedTuple())
+    layer = LayerNorm((2, 2), relu; epsilon=0.0f0)
 
-    # not canonized
-    modified_layer = modify_layer(rule, layer)
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+    # not canonized. The LayerNormRule computes its own statistics, so the
+    # cached pre-activation `zᵏ` is unused and `nothing` is passed instead:
+    # these v3-replicating affine parameters aren't valid for the Lux forward.
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, nothing, ps_affine, NamedTuple(), Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: LayerNorm splits into normalization and affine Scale part
     model = Chain(LayerNorm((2, 2), relu; epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=ps_affine), (; layer_1=NamedTuple()))
-    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
-    layer_2 = StaticLayer(model[2], ps.layer_2, st.layer_2)
-    modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
-    modified_layer_2 = modify_layer(ZeroRule(), layer_2)
+    z₁, aₙ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1) # normalization-only part
+    z₂, _ = node_forward(model[2], aₙ, ps.layer_2, st.layer_2)
 
-    R̂ᵏ = zero(aᵏ) # will be inplace updated
-    aₙ = layer_1(aᵏ) # activation after the normalization-only part
-    R = similar(aₙ) # relevance at the normalization output
-
-    @inferred lrp!(R, ZeroRule(), layer_2, modified_layer_2, aₙ, Rᵏ⁺¹)
-    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
+    R = @inferred propagate(ZeroRule(), model[2], aₙ, z₂, ps.layer_2, st.layer_2, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, R)
     @test R̂ᵏ ≈ Rᵏ
 
     ############################
     # no affine transformation #
     ############################
-    layer = StaticLayer(
-        LayerNorm((2, 2); affine=false, epsilon=0.0f0), NamedTuple(), NamedTuple()
-    )
+    layer = LayerNorm((2, 2); affine=false, epsilon=0.0f0)
 
     # not canonized
-    modified_layer = modify_layer(rule, layer)
-    R̂ᵏ = similar(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    zᵏ, _ = node_forward(layer, aᵏ, NamedTuple(), NamedTuple())
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, NamedTuple(), NamedTuple(), R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: a LayerNorm without affine part and activation stays unsplit
     model = Chain(LayerNorm((2, 2); affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
     @test length(model.layers) == 1
-    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
-    modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
+    z₁, _ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1)
 
-    R̂ᵏ = zero(aᵏ)
-    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, R)
+    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, R)
     @test R̂ᵏ ≈ Rᵏ
 
     ######################################
     # no affine transformation, but relu #
     ######################################
-    layer = StaticLayer(
-        LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0), NamedTuple(), NamedTuple()
-    )
+    layer = LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0)
 
     # not canonized
-    modified_layer = modify_layer(rule, layer)
-    R̂ᵏ = zero(aᵏ) # will be inplace updated
-    @inferred lrp!(R̂ᵏ, rule, layer, modified_layer, aᵏ, R)
+    zᵏ, _ = node_forward(layer, aᵏ, NamedTuple(), NamedTuple())
+    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, NamedTuple(), NamedTuple(), R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: splits into normalization and a bias-free Scale carrying relu
     model = Chain(LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
-    layer_1 = StaticLayer(model[1], ps.layer_1, st.layer_1)
-    layer_2 = StaticLayer(model[2], ps.layer_2, st.layer_2)
-    modified_layer_1 = modify_layer(LayerNormRule(), layer_1)
-    modified_layer_2 = modify_layer(ZeroRule(), layer_2)
+    z₁, aₙ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1)
+    z₂, _ = node_forward(model[2], aₙ, ps.layer_2, st.layer_2)
 
-    R̂ᵏ = zero(aᵏ) # will be inplace updated
-    aₙ = layer_1(aᵏ)
-    Rₙ = similar(aₙ)
-
-    @inferred lrp!(Rₙ, ZeroRule(), layer_2, modified_layer_2, aₙ, R)
-    @inferred lrp!(R̂ᵏ, rule, layer_1, modified_layer_1, aᵏ, Rₙ)
+    Rₙ = @inferred propagate(ZeroRule(), model[2], aₙ, z₂, ps.layer_2, st.layer_2, R)
+    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, Rₙ)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -355,29 +334,29 @@ end
 
     # Dense layer
     W, b = [1.0 -1.0; 2.0 0.0], [-1.0, 1.0]
-    layer = StaticLayer(Dense(2 => 2, relu), (; weight=W, bias=b), NamedTuple())
+    ps = (; weight=W, bias=b)
 
-    modified_layer = modify_layer(rule, layer)
-    @test modified_layer.ps.weight ≈ [1.42 -1.0; 2.84 0.0]
-    @test modified_layer.ps.bias ≈ [-1.0, 1.42]
-    @test layer.ps.weight ≈ W
-    @test layer.ps.bias ≈ b
+    ρps = @inferred modify_params(rule, ps)
+    @test ρps.weight ≈ [1.42 -1.0; 2.84 0.0]
+    @test ρps.bias ≈ [-1.0, 1.42]
+    @test ps.weight ≈ W # original parameters are not mutated
+    @test ps.bias ≈ b
 
-    modified_layer = modify_layer(Val(:keep_positive), layer)
-    @test modified_layer.ps.weight ≈ [1.0 0.0; 2.0 0.0]
-    @test modified_layer.ps.bias ≈ [0.0, 1.0]
+    ρps = modify_params(Val(:keep_positive), ps)
+    @test ρps.weight ≈ [1.0 0.0; 2.0 0.0]
+    @test ρps.bias ≈ [0.0, 1.0]
 
-    modified_layer = modify_layer(Val(:keep_positive), layer; keep_bias=false)
-    @test modified_layer.ps.weight ≈ [1.0 0.0; 2.0 0.0]
-    @test modified_layer.ps.bias ≈ [0.0, 0.0]
+    ρps = modify_params(Val(:keep_positive), ps; keep_bias=false)
+    @test ρps.weight ≈ [1.0 0.0; 2.0 0.0]
+    @test ρps.bias ≈ [0.0, 0.0]
 
-    modified_layer = modify_layer(Val(:keep_negative), layer)
-    @test modified_layer.ps.weight ≈ [0.0 -1.0; 0.0 0.0]
-    @test modified_layer.ps.bias ≈ [-1.0, 0.0]
+    ρps = modify_params(Val(:keep_negative), ps)
+    @test ρps.weight ≈ [0.0 -1.0; 0.0 0.0]
+    @test ρps.bias ≈ [-1.0, 0.0]
 
-    modified_layer = modify_layer(Val(:keep_negative), layer; keep_bias=false)
-    @test modified_layer.ps.weight ≈ [0.0 -1.0; 0.0 0.0]
-    @test modified_layer.ps.bias ≈ [0.0, 0.0]
+    ρps = modify_params(Val(:keep_negative), ps; keep_bias=false)
+    @test ρps.weight ≈ [0.0 -1.0; 0.0 0.0]
+    @test ρps.bias ≈ [0.0, 0.0]
 
     W = @inferred modify_weight(rule, W)
     b = @inferred modify_bias(rule, b)
@@ -386,22 +365,20 @@ end
 
     # Scale layer: Lux uniformly names the parameter `weight`, not `scale`
     w, b = [1.0, -1.0], [-1.0, 1.0]
-    layer = StaticLayer(Scale(2, relu), (; weight=w, bias=b), NamedTuple())
+    ps = (; weight=w, bias=b)
 
-    modified_layer = modify_layer(rule, layer)
-    @test modified_layer.ps.weight ≈ [1.42, -1.0]
-    @test modified_layer.ps.bias ≈ [-1.0, 1.42]
+    ρps = @inferred modify_params(rule, ps)
+    @test ρps.weight ≈ [1.42, -1.0]
+    @test ρps.bias ≈ [-1.0, 1.42]
 end
 
 ## Reference tests over all (rule, layer) combinations.
 # The JLD2 reference values from v3 stay valid: all test weights are explicit
 # StableRNG(123) draws that are injected into the Lux `ps` NamedTuples.
-function run_rule_tests(rule, layer, rulename, layername, aᵏ)
-    if is_compatible(rule, layer)
-        Rᵏ⁺¹ = layer(aᵏ)
-        Rᵏ = similar(aᵏ)
-        modified_layer = modify_layer(rule, layer)
-        lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
+function run_rule_tests(rule, layer, ps, st, rulename, layername, aᵏ)
+    if is_compatible(rule, layer, ps)
+        zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
+        Rᵏ = propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
         @test typeof(Rᵏ) == typeof(aᵏ)
         @test size(Rᵏ) == size(aᵏ)
         @test_reference "references/rules/$rulename/$layername.jld2" Dict("R" => Rᵏ) by =
@@ -417,12 +394,12 @@ batchsize = 2
 aᵏ_dense = pseudorandn(din, batchsize)
 
 layers = Dict(
-    "Dense_relu" => StaticLayer(
+    "Dense_relu" => (
         Dense(din => dout, relu),
         (; weight=pseudorandn(dout, din), bias=pseudorandn(dout)),
         NamedTuple(),
     ),
-    "Dense_identity" => StaticLayer(
+    "Dense_identity" => (
         Dense(din => dout; use_bias=false),
         (; weight=Matrix{Float32}(I, dout, din)),
         NamedTuple(),
@@ -431,9 +408,9 @@ layers = Dict(
 @testset "Dense" begin
     for (rulename, rule) in RULES
         @testset "$rulename" begin
-            for (layername, layer) in layers
+            for (layername, (layer, ps, st)) in layers
                 @testset "$layername" begin
-                    run_rule_tests(rule, layer, rulename, layername, aᵏ_dense)
+                    run_rule_tests(rule, layer, ps, st, rulename, layername, aᵏ_dense)
                 end
             end
         end
@@ -447,18 +424,17 @@ batchsize = 2
 aᵏ_scale = pseudorandn(d, batchsize)
 
 layers = Dict(
-    "Scale_relu" => StaticLayer(
-        Scale(d, relu), (; weight=pseudorandn(d), bias=pseudorandn(d)), NamedTuple()
-    ),
+    "Scale_relu" =>
+        (Scale(d, relu), (; weight=pseudorandn(d), bias=pseudorandn(d)), NamedTuple()),
     "Scale_identity" =>
-        StaticLayer(Scale(d; use_bias=false), (; weight=ones(Float32, d)), NamedTuple()),
+        (Scale(d; use_bias=false), (; weight=ones(Float32, d)), NamedTuple()),
 )
 @testset "Scale" begin
     for (rulename, rule) in RULES
         @testset "$rulename" begin
-            for (layername, layer) in layers
+            for (layername, (layer, ps, st)) in layers
                 @testset "$layername" begin
-                    run_rule_tests(rule, layer, rulename, layername, aᵏ_scale)
+                    run_rule_tests(rule, layer, ps, st, rulename, layername, aᵏ_scale)
                 end
             end
         end
@@ -470,21 +446,21 @@ cin, cout = 3, 4
 insize = (6, 6, 3, batchsize)
 aᵏ = pseudorandn(insize...)
 layers = Dict(
-    "Conv"           => StaticLayer(Conv((3, 3), cin => cout), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
-    "Conv_relu"      => StaticLayer(Conv((3, 3), cin => cout, relu), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
-    "MaxPool"        => static_testmode(MaxPool((3, 3))),
-    "MeanPool"       => static_testmode(MeanPool((3, 3))),
-    "GlobalMaxPool"  => static_testmode(GlobalMaxPool()),
-    "GlobalMeanPool" => static_testmode(GlobalMeanPool()),
-    "flatten"        => static_testmode(FlattenLayer()),
-    "Dropout"        => static_testmode(Dropout(0.2f0)),
+    "Conv"           => (Conv((3, 3), cin => cout), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
+    "Conv_relu"      => (Conv((3, 3), cin => cout, relu), (; weight=pseudorandn(3, 3, cin, cout), bias=pseudorandn(cout)), NamedTuple()),
+    "MaxPool"        => (MaxPool((3, 3)), setup_testmode(MaxPool((3, 3)))...),
+    "MeanPool"       => (MeanPool((3, 3)), setup_testmode(MeanPool((3, 3)))...),
+    "GlobalMaxPool"  => (GlobalMaxPool(), setup_testmode(GlobalMaxPool())...),
+    "GlobalMeanPool" => (GlobalMeanPool(), setup_testmode(GlobalMeanPool())...),
+    "flatten"        => (FlattenLayer(), setup_testmode(FlattenLayer())...),
+    "Dropout"        => (Dropout(0.2f0), setup_testmode(Dropout(0.2f0))...),
 )
 @testset "Other Layers" begin
     for (rulename, rule) in RULES
         @testset "$rulename" begin
-            for (layername, layer) in layers
+            for (layername, (layer, ps, st)) in layers
                 @testset "$layername" begin
-                    run_rule_tests(rule, layer, rulename, layername, aᵏ)
+                    run_rule_tests(rule, layer, ps, st, rulename, layername, aᵏ)
                 end
             end
         end
@@ -492,14 +468,8 @@ layers = Dict(
 end
 
 # Test equivalence of ZPlusRule() and AlphaBetaRule(1.0f0, 0.0f0)
-layer = layers["Conv"]
-Rᵏ⁺¹ = layer(aᵏ)
-Rᵏ_z⁺ = similar(aᵏ)
-Rᵏ_αβ = similar(aᵏ)
-rule = ZPlusRule()
-modified_layers = modify_layer(rule, layer)
-lrp!(Rᵏ_z⁺, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
-rule = AlphaBetaRule(1.0f0, 0.0f0)
-modified_layers = modify_layer(rule, layer)
-lrp!(Rᵏ_αβ, rule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
+layer, ps, st = layers["Conv"]
+zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
+Rᵏ_z⁺ = propagate(ZPlusRule(), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+Rᵏ_αβ = propagate(AlphaBetaRule(1.0f0, 0.0f0), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 @test Rᵏ_z⁺ ≈ Rᵏ_αβ

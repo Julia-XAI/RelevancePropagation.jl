@@ -28,9 +28,7 @@ const LRPSupportedLayer = Union{
     LRPSupportedActivation,
 }
 
-# Introspection accessors giving `StaticLayer` the same interface as a raw Lux
-# layer. `has_weight`/`has_bias` are consumed by the LRP rules (see `rules.jl`);
-# `activation_fn` completes the interface by forwarding to the wrapped layer.
-ModelSurgeon.activation_fn(f::StaticLayer) = activation_fn(f.layer)
-has_weight(f::StaticLayer) = haskey(f.ps, :weight)
-has_bias(f::StaticLayer) = haskey(f.ps, :bias)
+# Introspection on Lux parameter NamedTuples, consumed by the LRP rules
+# (see `rules.jl`).
+has_weight(ps) = haskey(ps, :weight)
+has_bias(ps) = haskey(ps, :bias)

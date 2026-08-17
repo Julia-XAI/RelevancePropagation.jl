@@ -167,6 +167,4 @@ expl.extras.layerwise_relevances
 # Note that the layerwise relevances are only kept for layers in the outermost `Chain` of the model.
 # Since our LeNet-5 model is flat, we obtained all relevances.
 
-#  ISSUE: check the diff and bring back the GPU section once GPUS are supported
-#
 # [^1]: G. Montavon et al., [Layer-Wise Relevance Propagation: An Overview](https://link.springer.com/chapter/10.1007/978-3-030-28954-6_10)

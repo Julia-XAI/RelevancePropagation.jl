@@ -7,16 +7,22 @@ using XAIBase: AbstractOutputSelector
 using XAIBase: AbstractFeatureSelector, number_of_features
 
 using Lux: Chain, Parallel, SkipConnection
-using Lux: Dense, Scale, LayerNorm
+using Lux: Dense, Scale, LayerNorm, Conv, ConvTranspose
 using Lux: NoOpLayer, WrappedFunction
-using LuxCore: apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
+using LuxCore: LuxCore, apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
+using LuxCore: AbstractLuxWrapperLayer
 
-using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
-using Enzyme: Const, Duplicated, make_zero
+using Enzyme: autodiff, Reverse, Active
+using Enzyme: Const, Duplicated, DuplicatedNoNeed, make_zero
+using Enzyme.EnzymeRules: EnzymeRules, RevConfig, AugmentedReturn
+using Enzyme.EnzymeRules: needs_primal, needs_shadow, overwritten
 
 using Functors: KeyPath
+using LinearAlgebra: dot
 using NNlib: relu, gelu, swish, mish
+using NNlib: conv, ∇conv_data, DenseConvDims
 using Markdown: @md_str
+using Static: known
 using Statistics: mean, var
 
 @reexport using XAIBase

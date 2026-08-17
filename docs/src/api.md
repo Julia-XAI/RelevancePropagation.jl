@@ -109,7 +109,7 @@ RelevancePropagation.modify_denominator
 RelevancePropagation.modify_parameters
 RelevancePropagation.modify_weight
 RelevancePropagation.modify_bias
-RelevancePropagation.modify_layer
+RelevancePropagation.modify_params
 RelevancePropagation.is_compatible
 ```
 Compatibility settings:

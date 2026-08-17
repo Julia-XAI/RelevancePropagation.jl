@@ -1,17 +1,20 @@
-using RelevancePropagation: StaticLayer, layer_pullback
+using RelevancePropagation:
+    input_vjp, seeded_pullback, node_forward, node_output, rule_layer
 using Test
 
 using Lux
+using LuxCore: LuxCore
 using StableRNGs: StableRNG
 using Zygote: Zygote
 
 x_dense = randn(StableRNG(1), Float32, 4, 2)
 x_img = randn(StableRNG(2), Float32, 6, 6, 3, 2)
+x_img4 = randn(StableRNG(3), Float32, 6, 6, 4, 2)
 
-# Enzyme split-mode pullbacks are cross-checked against Zygote VJPs.
-# `layer_pullback` covers the whole differentiation surface of LRP, including
+# The nested Enzyme VJPs are cross-checked against Zygote.
+# `seeded_pullback` covers the whole differentiation surface of LRP, including
 # the nonlinear pass-through layers (pooling, testmode BatchNorm, activations).
-LAYERS_1SEED = [
+LAYERS = [
     ("Dense identity", Dense(4 => 3), x_dense),
     ("Dense relu", Dense(4 => 3, relu), x_dense),
     ("Dense gelu", Dense(4 => 3, gelu), x_dense),
@@ -20,7 +23,18 @@ LAYERS_1SEED = [
     ("Conv", Conv((3, 3), 3 => 4), x_img),
     ("Conv relu", Conv((3, 3), 3 => 4, relu), x_img),
     ("Conv cross-correlation", Conv((3, 3), 3 => 4; cross_correlation=true), x_img),
+    ("Conv stride", Conv((3, 3), 3 => 4, relu; stride=2), x_img),
+    ("Conv pad", Conv((3, 3), 3 => 4, relu; pad=1), x_img),
+    ("Conv dilation", Conv((2, 2), 3 => 4, relu; dilation=2), x_img),
+    ("Conv groups", Conv((3, 3), 4 => 4, relu; groups=2), x_img4),
     ("ConvTranspose", ConvTranspose((3, 3), 3 => 4), x_img),
+    ("ConvTranspose stride", ConvTranspose((3, 3), 3 => 4, relu; stride=2), x_img),
+    ("ConvTranspose outpad", ConvTranspose((3, 3), 3 => 4; stride=2, outpad=1), x_img),
+    (
+        "ConvTranspose cross-correlation",
+        ConvTranspose((3, 3), 3 => 4; cross_correlation=true),
+        x_img,
+    ),
     ("MaxPool", MaxPool((2, 2)), x_img),
     ("MeanPool", MeanPool((2, 2)), x_img),
     ("GlobalMaxPool", GlobalMaxPool(), x_img),
@@ -36,19 +50,39 @@ LAYERS_1SEED = [
     ("Dropout testmode", Dropout(0.5f0), x_img),
 ]
 
-static(layer) = StaticLayer(layer, Lux.setup(StableRNG(123), layer)...)
+setup_testmode(layer) = (l=Lux.setup(StableRNG(123), layer); (l[1], Lux.testmode(l[2])))
 
-@testset "layer_pullback vs Zygote" begin
-    for (name, layer, x) in LAYERS_1SEED
+@testset "seeded_pullback vs Zygote" begin
+    for (name, layer, x) in LAYERS
         @testset "$name" begin
-            f = static(layer)
-            z_ref, back_ref = Zygote.pullback(f, x)
+            ps, st = setup_testmode(layer)
+            z_ref, back_ref = Zygote.pullback(
+                x -> first(LuxCore.apply(layer, x, ps, st)), x
+            )
             s = randn(StableRNG(17), Float32, size(z_ref)...)
             dx_ref = only(back_ref(s))
+            @test seeded_pullback(layer, x, ps, st, s) ≈ dx_ref
 
-            z, back = layer_pullback(f, x)
-            @test z ≈ z_ref
-            @test back(s) ≈ dx_ref
+            # node_forward splits the forward pass into affine part and
+            # activation; node_output must reconstruct the layer output.
+            z, y = node_forward(layer, x, ps, st)
+            @test y ≈ z_ref
+            @test node_output(layer, z) ≈ z_ref
+        end
+    end
+end
+
+# The hand-written fast-path VJPs must agree with the nested-AD fallback on
+# the activation-stripped layers `propagate` uses them on.
+@testset "input_vjp fast paths vs nested AD" begin
+    for (name, layer, x) in LAYERS
+        f = rule_layer(layer)
+        f isa Union{Dense,Scale,Conv,ConvTranspose} || continue
+        @testset "$name" begin
+            ps, st = setup_testmode(layer)
+            z = first(LuxCore.apply(f, x, ps, st))
+            s = randn(StableRNG(17), Float32, size(z)...)
+            @test input_vjp(f, x, ps, st, s) ≈ seeded_pullback(f, x, ps, st, s)
         end
     end
 end

@@ -3,7 +3,7 @@
 # - `chainmap`  → `map_layers`, returning nested NamedTuples keyed like `ps`
 # - `chainzip`  → zipping NamedTuples along the model tree; its user-facing
 #   behavior (rules zipped over layers, key-mismatch errors) is covered in
-#   test_lrp.jl via `get_modified_layers`
+#   test_lrp.jl via `wrap_rules`/`check_rule_compat`
 # - `chainindices`/`ModelIndex` → `layer_indices` on `Functors.KeyPath`,
 #   tested RP-side in test_layer_indices.jl
 using Test

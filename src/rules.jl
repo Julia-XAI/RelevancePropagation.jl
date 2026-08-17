@@ -5,8 +5,8 @@
 Abstract supertype of all LRP rules.
 Custom rules must subtype `AbstractLRPRule` and can customize their behavior by
 extending [`modify_input`](@ref), [`modify_denominator`](@ref),
-[`modify_parameters`](@ref), [`modify_layer`](@ref) and [`is_compatible`](@ref),
-or by implementing a custom `lrp!` method.
+[`modify_parameters`](@ref) and [`is_compatible`](@ref),
+or by implementing a custom [`propagate`](@ref) method.
 """
 abstract type AbstractLRPRule end
 
@@ -17,42 +17,57 @@ const LRP_DEFAULT_STABILIZER = 1.0f-9
 const LRP_DEFAULT_ALPHA = 2.0f0
 const LRP_DEFAULT_BETA = 1.0f0
 
-# Generic LRP rule. Used by all rules without custom implementations.
-function lrp!(Rᵏ, rule::AbstractLRPRule, layer::StaticLayer, modified_layer, aᵏ, Rᵏ⁺¹)
-    layer = isnothing(modified_layer) ? layer : modified_layer
+"""
+    propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+
+Propagate the relevance `Rᵏ⁺¹` at the output of a layer to the relevance `Rᵏ`
+at its input, according to the LRP rule. This is the "hijacked VJP" the
+Enzyme reverse pass calls for each rule-carrying node ([`lrp_node`](@ref)),
+and it is a pure function: `Rᵏ` is returned.
+
+# Arguments
+- `rule`: LRP rule to apply.
+- `layer`: The Lux layer relevance is propagated through.
+- `aᵏ`: Layer input activation.
+- `zᵏ`: Pre-activation of the layer, cached on the Enzyme tape by
+  [`node_forward`](@ref). For layers that are not split into affine part and
+  activation, `zᵏ` equals the layer output.
+- `ps`, `st`: Unmodified layer parameters and states.
+- `Rᵏ⁺¹`: Relevance at the layer output.
+"""
+function propagate(rule::AbstractLRPRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    f = rule_layer(layer)
     ãᵏ = modify_input(rule, aᵏ)
-    z, back = layer_pullback(layer, ãᵏ)
-    s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
-    c = back(s)
-    Rᵏ .= ãᵏ .* c
-    return Rᵏ
+    ρps = modify_params(rule, ps)
+    # If neither input nor parameters are modified, the cached pre-activation
+    # is the rule's z̃ and no additional forward pass is needed.
+    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(f, ãᵏ, ρps, st))
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, z̃)
+    c = input_vjp(f, ãᵏ, ρps, st, s)
+    return ãᵏ .* c
 end
 
 #===================================#
 # Functions used to implement rules #
 #===================================#
 
-# The function that follow define the default fallbacks used by LRP rules
-# when calling the generic `lrp!` implementation above.
+# The functions that follow define the default fallbacks used by LRP rules
+# when calling the generic `propagate` implementation above.
 # Rule types are used to dispatch on rule-specific implementations.
 
 # To implement a new rule, extend the following functions for your rule type:
 # - modify_input
 # - modify_denominator
-# - modify_parameters OR (modify_weight and modify_bias) OR modify_layer
+# - modify_parameters OR (modify_weight and modify_bias)
 # - is_compatible
 
-const LRP_LAYER_MODIFICATION_DIAGRAM = """
-Use of a custom function `modify_layer` will overwrite functionality of `modify_parameters`,
-`modify_weight` and `modify_bias` for the implemented combination of rule and layer types.
-This is due to the fact that internally, `modify_weight` and `modify_bias` are called
-by the default implementation of `modify_layer`.
-`modify_weight` and `modify_bias` in turn call `modify_parameters` by default.
-
-The default call structure looks as follows:
+const LRP_PARAMETER_MODIFICATION_DIAGRAM = """
+Rules modify the `weight` and `bias` entries of a layer's `ps` NamedTuple
+via `modify_weight` and `modify_bias`, which by default both call
+`modify_parameters`:
 ```
 ┌─────────────────────────────────────────┐
-│              modify_layer               │
+│              modify_params              │
 └─────────┬─────────────────────┬─────────┘
           │ calls               │ calls
 ┌─────────▼─────────┐ ┌─────────▼─────────┐
@@ -80,12 +95,12 @@ Modify denominator ``z`` for numerical stability on the forward pass.
 modify_denominator(rule, d) = stabilize_denom(d, LRP_DEFAULT_STABILIZER)
 
 """
-    is_compatible(rule, layer)
+    is_compatible(rule, layer, ps)
 
-Check compatibility of a LRP-Rule with a [`StaticLayer`](@ref).
+Check compatibility of an LRP rule with a Lux `layer` and its parameters `ps`.
 By default, a rule is compatible with layers that have a `weight` parameter.
 """
-is_compatible(rule, layer::StaticLayer) = has_weight(layer)
+is_compatible(rule, layer, ps) = has_weight(ps)
 
 struct LRPCompatibilityError <: Exception
     rule::String
@@ -102,7 +117,7 @@ end
 Modify parameters before computing the relevance.
 
 ## Note
-$LRP_LAYER_MODIFICATION_DIAGRAM
+$LRP_PARAMETER_MODIFICATION_DIAGRAM
 """
 modify_parameters(rule, param) = param
 
@@ -112,7 +127,7 @@ modify_parameters(rule, param) = param
 Modify layer weights before computing the relevance.
 
 ## Note
-$LRP_LAYER_MODIFICATION_DIAGRAM
+$LRP_PARAMETER_MODIFICATION_DIAGRAM
 """
 modify_weight(rule, w) = modify_parameters(rule, w)
 
@@ -122,37 +137,38 @@ modify_weight(rule, w) = modify_parameters(rule, w)
 Modify layer bias before computing the relevance.
 
 ## Note
-$LRP_LAYER_MODIFICATION_DIAGRAM
+$LRP_PARAMETER_MODIFICATION_DIAGRAM
 """
 modify_bias(rule, b) = modify_parameters(rule, b)
 
 """
-    modify_layer(rule, layer)
+    modify_params(rule, ps; keep_bias=true)
 
-Modify a [`StaticLayer`](@ref) before computing the relevance:
-weight and bias in `ps` are modified via `modify_weight` and `modify_bias`,
-and the layer's activation function is removed.
-Layers without weights are returned unmodified.
+Return the parameter NamedTuple `ps` with `weight` and `bias` modified via
+[`modify_weight`](@ref) and [`modify_bias`](@ref).
+Setting `keep_bias=false` zeroes the bias instead.
+
+Parameters without a `weight` entry are returned unchanged. If no
+modification is applied, `ps` itself is returned (`===`), which signals to
+[`propagate`](@ref) that the cached pre-activation can be reused.
+
+Modified parameters are computed lazily on each call: rules only hold their
+hyperparameters, no copies of model parameters.
 
 ## Note
-$LRP_LAYER_MODIFICATION_DIAGRAM
+$LRP_PARAMETER_MODIFICATION_DIAGRAM
 """
-function modify_layer(rule, layer::StaticLayer; keep_bias=true)
-    !is_compatible(rule, layer) && throw(LRPCompatibilityError(rule, layer.layer))
-    !has_weight(layer) && return layer
-
-    weight = modify_weight(rule, layer.ps.weight)
-    modified_ps = if !has_bias(layer)
-        (; weight)
-    elseif keep_bias
-        (; weight, bias=modify_bias(rule, layer.ps.bias))
-    else
-        (; weight, bias=zero(layer.ps.bias))
+function modify_params(rule, ps; keep_bias::Bool=true)
+    has_weight(ps) || return ps
+    weight = modify_weight(rule, ps.weight)
+    if !has_bias(ps)
+        weight === ps.weight && return ps
+        return merge(ps, (; weight))
     end
-    ps = merge(layer.ps, modified_ps)
-    return StaticLayer(remove_activation(layer.layer), ps, layer.st)
+    bias = keep_bias ? modify_bias(rule, ps.bias) : zero(ps.bias)
+    weight === ps.weight && bias === ps.bias && return ps
+    return merge(ps, (; weight, bias))
 end
-# ISSUE: is this even needed if Lux separates layers and parameters? This feels like a left-over from the Flux code and non-ideomatic in Lux. You introduced `StaticLayer` to bundle layers and parameters (which I don't think was needed), and here you try to distangle your own entanglement.
 
 # Useful presets, used e.g. in AlphaBetaRule, ZBoxRule & ZPlusRule:
 modify_parameters(::Val{:keep_positive}, p) = keep_positive(p)
@@ -162,7 +178,8 @@ modify_parameters(::Val{:keep_negative}, p) = keep_negative(p)
 # LRP Rules #
 #===========#
 
-# The following LRP rules use the generic `lrp!` implementation at the top of this file.
+# The following LRP rules use the generic `propagate` implementation at the
+# top of this file.
 
 """
     ZeroRule()
@@ -179,7 +196,7 @@ R_j^k = \\sum_i \\frac{W_{ij}a_j^k}{\\sum_l W_{il}a_l^k+b_i} R_i^{k+1}
 - $REF_BACH_LRP
 """
 struct ZeroRule <: AbstractLRPRule end
-is_compatible(::ZeroRule, layer::StaticLayer) = true # compatible with all layer types
+is_compatible(::ZeroRule, layer, ps) = true # compatible with all layer types
 
 """
     EpsilonRule([epsilon=$(LRP_DEFAULT_EPSILON)])
@@ -203,7 +220,7 @@ struct EpsilonRule{T<:Real} <: AbstractLRPRule
     EpsilonRule(epsilon=LRP_DEFAULT_EPSILON) = new{eltype(epsilon)}(epsilon)
 end
 modify_denominator(r::EpsilonRule, d) = stabilize_denom(d, r.ϵ)
-is_compatible(::EpsilonRule, layer::StaticLayer) = true # compatible with all layer types
+is_compatible(::EpsilonRule, layer, ps) = true # compatible with all layer types
 
 """
     GammaRule([gamma=$(LRP_DEFAULT_GAMMA)])
@@ -286,9 +303,9 @@ modify_bias(::FlatRule, b) = zero(b)
 # Complex LRP Rules #
 #===================#
 
-# The following rules use custom `lrp!` implementations
-# and optionally custom `modify_layer` functions which return multiple modified layers.
-# The convention used here is to return multiple modified layers as named tuples.
+# The following rules use custom `propagate` implementations.
+# Rules that require several modified parameter variants construct them
+# lazily inside their `propagate` body via `modify_params`.
 
 """
     PassRule()
@@ -304,13 +321,12 @@ R_j^k = R_j^{k+1}
 ```
 """
 struct PassRule <: AbstractLRPRule end
-function lrp!(Rᵏ, ::PassRule, layer::StaticLayer, _modified_layer, aᵏ, Rᵏ⁺¹)
-    return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
+function propagate(::PassRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    return reshape_relevance(aᵏ, Rᵏ⁺¹)
 end
-modify_layer(::PassRule, layer::StaticLayer) = nothing # no modified layer needed
-is_compatible(::PassRule, layer::StaticLayer) = true
+is_compatible(::PassRule, layer, ps) = true
 
-reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹) = Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
+reshape_relevance(aᵏ, Rᵏ⁺¹) = reshape(Rᵏ⁺¹, size(aᵏ))
 
 """
     ZBoxRule(low, high)
@@ -335,28 +351,23 @@ struct ZBoxRule{T} <: AbstractLRPRule
     low::T
     high::T
 end
-function modify_layer(::ZBoxRule, layer::StaticLayer)
-    return (
-        layer⁺ = modify_layer(Val(:keep_positive), layer),
-        layer⁻ = modify_layer(Val(:keep_negative), layer),
-    )
-end
 
-# The ZBoxRule requires its own implementation of relevance propagation.
-function lrp!(Rᵏ, rule::ZBoxRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function propagate(rule::ZBoxRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    f = rule_layer(layer)
     l = zbox_input(aᵏ, rule.low)
     h = zbox_input(aᵏ, rule.high)
+    ps⁺ = modify_params(Val(:keep_positive), ps)
+    ps⁻ = modify_params(Val(:keep_negative), ps)
 
-    # Each `back` is called exactly once, so three single-seed pullbacks suffice.
-    z, back = layer_pullback(layer, aᵏ)
-    z⁺, back⁺ = layer_pullback(modified_layers.layer⁺, l)
-    z⁻, back⁻ = layer_pullback(modified_layers.layer⁻, h)
+    z = node_output(layer, zᵏ) # unmodified layer, including its activation
+    z⁺ = first(apply(f, l, ps⁺, st))
+    z⁻ = first(apply(f, h, ps⁻, st))
 
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z - z⁺ - z⁻)
-    c = back(s)
-    c⁺ = back⁺(s)
-    c⁻ = back⁻(s)
-    @. Rᵏ = aᵏ * c - l * c⁺ - h * c⁻
+    c = input_vjp(layer, aᵏ, ps, st, s) # unmodified layer, including activation
+    c⁺ = input_vjp(f, l, ps⁺, st, s)
+    c⁻ = input_vjp(f, h, ps⁻, st, s)
+    return @. aᵏ * c - l * c⁺ - h * c⁻
 end
 
 zbox_input(in::AbstractArray{T}, c::Real) where {T} = fill(convert(T, c), size(in))
@@ -384,25 +395,21 @@ R_j^k = \\sum_i\\frac{\\left(W_{ij}a_j^k\\right)^+}{\\sum_l\\left(W_{il}a_l^k+b_
 - $REF_MONTAVON_DTD
 """
 struct ZPlusRule <: AbstractLRPRule end
-function modify_layer(::ZPlusRule, layer::StaticLayer)
-    return (
-        layer⁺ = modify_layer(Val(:keep_positive), layer),
-        layer⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
-    )
-end
 
-function lrp!(Rᵏ, rule::ZPlusRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function propagate(rule::ZPlusRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
+    ps⁺ = modify_params(Val(:keep_positive), ps)
+    ps⁻ = modify_params(Val(:keep_negative), ps; keep_bias=false)
 
-    # Each `back` is called exactly once, so two single-seed pullbacks suffice.
-    z⁺, back⁺ = layer_pullback(modified_layers.layer⁺, aᵏ⁺)
-    z⁻, back⁻ = layer_pullback(modified_layers.layer⁻, aᵏ⁻)
+    z⁺ = first(apply(f, aᵏ⁺, ps⁺, st))
+    z⁻ = first(apply(f, aᵏ⁻, ps⁻, st))
 
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z⁺ + z⁻)
-    c⁺ = back⁺(s)
-    c⁻ = back⁻(s)
-    @. Rᵏ = aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
+    c⁺ = input_vjp(f, aᵏ⁺, ps⁺, st, s)
+    c⁻ = input_vjp(f, aᵏ⁻, ps⁻, st, s)
+    return @. aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
 end
 
 """
@@ -439,41 +446,35 @@ struct AlphaBetaRule{T<:Real} <: AbstractLRPRule
         return new{eltype(alpha)}(alpha, beta)
     end
 end
-function modify_layer(::AlphaBetaRule, layer::StaticLayer)
-    return (
-        layerᵅ⁺ = modify_layer(Val(:keep_positive), layer),
-        layerᵅ⁻ = modify_layer(Val(:keep_negative), layer; keep_bias=false),
-        layerᵝ⁻ = modify_layer(Val(:keep_negative), layer),
-        layerᵝ⁺ = modify_layer(Val(:keep_positive), layer; keep_bias=false),
-    )
-end
 
-function lrp!(Rᵏ, rule::AlphaBetaRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function propagate(rule::AlphaBetaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
+    # ᵅ/ᵝ: parameter variants of the positive and negative term. The α- and
+    # β-variants share weights and only differ in their biases, so the
+    # β-VJPs are computed through the α-variants.
+    psᵅ⁺ = modify_params(Val(:keep_positive), ps)
+    psᵅ⁻ = modify_params(Val(:keep_negative), ps; keep_bias=false)
+    psᵝ⁻ = modify_params(Val(:keep_negative), ps)
+    psᵝ⁺ = modify_params(Val(:keep_positive), ps; keep_bias=false)
 
-    # The α- and β-variants share weights and only differ in their biases,
-    # so their VJPs agree and both seeds are pulled back through the
-    # α-variants. Each pullback is single-use, so one is built per seed.
-    zᵅ⁺, backᵅ⁺ = layer_pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
-    zᵅ⁻, backᵅ⁻ = layer_pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
-    _, backᵝ⁺ = layer_pullback(modified_layers.layerᵅ⁺, aᵏ⁺)
-    _, backᵝ⁻ = layer_pullback(modified_layers.layerᵅ⁻, aᵏ⁻)
-    # No need to linearize again: Wᵝ⁺ = Wᵅ⁺ and Wᵝ⁻ = Wᵅ⁻
-    zᵝ⁺ = modified_layers.layerᵝ⁺(aᵏ⁻)
-    zᵝ⁻ = modified_layers.layerᵝ⁻(aᵏ⁺)
+    zᵅ⁺ = first(apply(f, aᵏ⁺, psᵅ⁺, st))
+    zᵅ⁻ = first(apply(f, aᵏ⁻, psᵅ⁻, st))
+    zᵝ⁺ = first(apply(f, aᵏ⁻, psᵝ⁺, st))
+    zᵝ⁻ = first(apply(f, aᵏ⁺, psᵝ⁻, st))
 
     sᵅ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵅ⁺ + zᵅ⁻)
     sᵝ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵝ⁺ + zᵝ⁻)
-    cᵅ⁺ = backᵅ⁺(sᵅ)
-    cᵅ⁻ = backᵅ⁻(sᵅ)
-    cᵝ⁺ = backᵝ⁺(sᵝ)
-    cᵝ⁻ = backᵝ⁻(sᵝ)
+    cᵅ⁺ = input_vjp(f, aᵏ⁺, psᵅ⁺, st, sᵅ)
+    cᵅ⁻ = input_vjp(f, aᵏ⁻, psᵅ⁻, st, sᵅ)
+    cᵝ⁺ = input_vjp(f, aᵏ⁺, psᵅ⁺, st, sᵝ) # Wᵝ⁺ = Wᵅ⁺
+    cᵝ⁻ = input_vjp(f, aᵏ⁻, psᵅ⁻, st, sᵝ) # Wᵝ⁻ = Wᵅ⁻
 
     T = eltype(aᵏ)
     α = convert(T, rule.α)
     β = convert(T, rule.β)
-    @. Rᵏ = α * (aᵏ⁺ * cᵅ⁺ + aᵏ⁻ * cᵅ⁻) - β * (aᵏ⁺ * cᵝ⁻ + aᵏ⁻ * cᵝ⁺)
+    return @. α * (aᵏ⁺ * cᵅ⁺ + aᵏ⁻ * cᵅ⁻) - β * (aᵏ⁺ * cᵝ⁻ + aᵏ⁻ * cᵝ⁺)
 end
 
 """
@@ -504,41 +505,34 @@ struct GeneralizedGammaRule{T<:Real} <: AbstractLRPRule
     γ::T
     GeneralizedGammaRule(gamma=LRP_DEFAULT_GAMMA) = new{eltype(gamma)}(gamma)
 end
-function modify_layer(rule::GeneralizedGammaRule, layer::StaticLayer)
-    # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation
-    rule⁺ = GammaRule(rule.γ)
-    rule⁻ = NegativeGammaRule(rule.γ)
-    return (
-        layerˡ⁺ = modify_layer(rule⁺, layer),
-        layerˡ⁻ = modify_layer(rule⁻, layer; keep_bias=false),
-        layerʳ⁻ = modify_layer(rule⁻, layer),
-        layerʳ⁺ = modify_layer(rule⁺, layer; keep_bias=false),
-    )
-end
 
-function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer::StaticLayer, modified_layers, aᵏ, Rᵏ⁺¹)
+function propagate(rule::GeneralizedGammaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
+    # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation. The ˡ/ʳ-variants
+    # share weights, so the ʳ-VJPs are computed through the ˡ-variants.
+    rule⁺ = GammaRule(rule.γ)
+    rule⁻ = NegativeGammaRule(rule.γ)
+    psˡ⁺ = modify_params(rule⁺, ps)
+    psˡ⁻ = modify_params(rule⁻, ps; keep_bias=false)
+    psʳ⁻ = modify_params(rule⁻, ps)
+    psʳ⁺ = modify_params(rule⁺, ps; keep_bias=false)
 
-    # As in AlphaBetaRule, the ˡ/ʳ-variants share weights, so both seeds are
-    # pulled back through the ˡ-variants, with one single-use pullback each.
-    zˡ⁺, backˡ⁺ = layer_pullback(modified_layers.layerˡ⁺, aᵏ⁺)
-    zˡ⁻, backˡ⁻ = layer_pullback(modified_layers.layerˡ⁻, aᵏ⁻)
-    _, backʳ⁺ = layer_pullback(modified_layers.layerˡ⁺, aᵏ⁺)
-    _, backʳ⁻ = layer_pullback(modified_layers.layerˡ⁻, aᵏ⁻)
-    # No need to linearize again: Wˡ⁺ = Wʳ⁺ and Wˡ⁻ = Wʳ⁻
-    zʳ⁺ = modified_layers.layerʳ⁺(aᵏ⁻)
-    zʳ⁻ = modified_layers.layerʳ⁻(aᵏ⁺)
+    zˡ⁺ = first(apply(f, aᵏ⁺, psˡ⁺, st))
+    zˡ⁻ = first(apply(f, aᵏ⁻, psˡ⁻, st))
+    zʳ⁺ = first(apply(f, aᵏ⁻, psʳ⁺, st))
+    zʳ⁻ = first(apply(f, aᵏ⁺, psʳ⁻, st))
     # Unmodified layer, including its (leakyrelu) activation:
-    z = layer(aᵏ)
+    z = node_output(layer, zᵏ)
 
     sˡ = masked_copy(Rᵏ⁺¹, z .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
     sʳ = masked_copy(Rᵏ⁺¹, z .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
-    cˡ⁺ = backˡ⁺(sˡ)
-    cˡ⁻ = backˡ⁻(sˡ)
-    cʳ⁺ = backʳ⁺(sʳ)
-    cʳ⁻ = backʳ⁻(sʳ)
-    @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
+    cˡ⁺ = input_vjp(f, aᵏ⁺, psˡ⁺, st, sˡ)
+    cˡ⁻ = input_vjp(f, aᵏ⁻, psˡ⁻, st, sˡ)
+    cʳ⁺ = input_vjp(f, aᵏ⁺, psˡ⁺, st, sʳ) # Wʳ⁺ = Wˡ⁺
+    cʳ⁻ = input_vjp(f, aᵏ⁻, psˡ⁻, st, sʳ) # Wʳ⁻ = Wˡ⁻
+    return @. aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
 end
 
 """
@@ -570,59 +564,54 @@ normalization v3 (Flux) applied.
 - $REF_ALI_TRANSFORMER
 """
 struct LayerNormRule <: AbstractLRPRule end
-is_compatible(::LayerNormRule, ::StaticLayer{<:LayerNorm}) = true
+is_compatible(::LayerNormRule, ::LayerNorm, ps) = true
 
-function lrp!(Rᵏ, ::LayerNormRule, f::StaticLayer{<:LayerNorm}, _modified_layer, aᵏ, Rᵏ⁺¹)
-    layer = f.layer
+function propagate(::LayerNormRule, layer::LayerNorm, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     dims = layer.dims # Colon() means statistics over all dimensions
     μₐ = mean(aᵏ; dims=dims)
     z = aᵏ .- μₐ
 
-    if has_bias(f) # affine LayerNorm: Lux stores its parameters as ps.scale/ps.bias
+    R = if has_bias(ps) # affine LayerNorm: Lux stores its parameters as ps.scale/ps.bias
         # Forward pass through the normalization part, matching Lux's formula
         # activation.(scale .* (x .- μ) ./ sqrt.(σ² .+ ϵ) .+ bias):
         ϵ = convert(float(eltype(aᵏ)), layer.epsilon)
         σ² = var(aᵏ; dims=dims, mean=μₐ, corrected=false)
         aᵏₙ = @. z / sqrt(σ² + ϵ)
-        # Call ZeroRule on the affine part as a fallback when the model is not
-        # canonized. The Scale layer carries the activation; LRP removes it in
-        # modify_layer.
-        scale = StaticLayer(
-            Scale(layer.shape, layer.activation),
-            (; weight=f.ps.scale, bias=f.ps.bias),
-            NamedTuple(),
-        )
-        lrp!(Rᵏ, ZeroRule(), scale, modify_layer(ZeroRule(), scale), aᵏₙ, Rᵏ⁺¹)
+        # Propagate through the affine part with the ZeroRule as a fallback
+        # when the model is not canonized. The Scale layer carries the
+        # activation; `rule_layer` strips it inside `propagate`.
+        scale = Scale(layer.shape, layer.activation)
+        ps_scale = (; weight=ps.scale, bias=ps.bias)
+        zₙ, _ = node_forward(scale, aᵏₙ, ps_scale, NamedTuple())
+        propagate(ZeroRule(), scale, aᵏₙ, zₙ, ps_scale, NamedTuple(), Rᵏ⁺¹)
     else
-        Rᵏ .= Rᵏ⁺¹
+        Rᵏ⁺¹
     end
     # LRP pass through the normalization
-    s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
+    s = @. R / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
     μₛ = mean(s; dims=dims)
-    @. Rᵏ = aᵏ * (s - μₛ)
-    return Rᵏ
+    return @. aᵏ * (s - μₛ)
 end
 
 #==========================#
 # Performance improvements #
 #==========================#
 
-# The following functions aren't strictly necessary – tests still pass when removing them.
+# The following methods aren't strictly necessary – tests still pass when removing them.
 # However they improve performance on specific combinations of rule and layer types.
 
 # Rules that don't require layer information:
 for R in (ZeroRule, EpsilonRule)
     for L in (DropoutLayer, ReshapingLayer)
-        @eval function lrp!(
-            Rᵏ, _rule::$R, _layer::StaticLayer{<:$L}, _modified_layer, aᵏ, Rᵏ⁺¹
-        )
-            return reshape_relevance!(Rᵏ, aᵏ, Rᵏ⁺¹)
+        @eval function propagate(_rule::$R, _layer::$L, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+            return reshape_relevance(aᵏ, Rᵏ⁺¹)
         end
     end
 end
 
-function lrp!(Rᵏ, _rule::FlatRule, _layer::StaticLayer{<:Dense}, _modified_layer, _aᵏ, Rᵏ⁺¹)
-    n = size(Rᵏ, 1) # number of input neurons connected to each output neuron
+function propagate(_rule::FlatRule, _layer::Dense, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    n = size(aᵏ, 1) # number of input neurons connected to each output neuron
+    Rᵏ = similar(aᵏ)
     for i in axes(Rᵏ, 2) # samples in batch
         fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
     end

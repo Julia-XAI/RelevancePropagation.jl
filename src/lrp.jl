@@ -1,35 +1,59 @@
-#===================#
-# Structure helpers #
-#===================#
+#================#
+# Model wrapping #
+#================#
 
-# Construct the NamedTuple of modified layers by zipping rules and layers
-# along the model structure.
-function get_modified_layers(
-    rules::NamedTuple, static::StaticLayer{<:Union{Chain,Parallel}}
-)
-    children = static_children(static)
-    if keys(rules) != keys(children)
+# Validate the rule NamedTuple against the model structure and check
+# rule-layer compatibility. Mirrors the structure of `wrap_rules` below.
+function check_rule_compat(rules::NamedTuple, model::Union{Chain,Parallel}, ps)
+    layers = model.layers
+    if keys(rules) != keys(layers)
         throw(
             ArgumentError(
-                "Rule keys $(keys(rules)) don't match layer keys $(keys(children))."
+                "Rule keys $(keys(rules)) don't match layer keys $(keys(layers))."
             ),
         )
     end
-    return NamedTuple{keys(children)}(
-        map(get_modified_layers, values(rules), values(children))
-    )
+    for k in keys(layers)
+        check_rule_compat(rules[k], layers[k], ps[k])
+    end
 end
-function get_modified_layers(rules, static::StaticLayer{<:SkipConnection})
-    return get_modified_layers(rules, static_inner(static))
+# `SkipConnection` is an `AbstractLuxWrapperLayer`: its `ps`/`st` pass through
+# to the wrapped layer directly, and so do its rules.
+check_rule_compat(rules, sc::SkipConnection, ps) = check_rule_compat(rules, sc.layers, ps)
+# Disambiguation: a rule assigned to a SkipConnection targets the wrapped layer
+function check_rule_compat(rule::AbstractLRPRule, sc::SkipConnection, ps)
+    return check_rule_compat(rule, sc.layers, ps)
 end
-get_modified_layers(rule::AbstractLRPRule, static::StaticLayer) = modify_layer(rule, static)
-# Disambiguation: a rule assigned to a SkipConnection recurses into the wrapped layer
-function get_modified_layers(rule::AbstractLRPRule, static::StaticLayer{<:SkipConnection})
-    return get_modified_layers(rule, static_inner(static))
+function check_rule_compat(rule::AbstractLRPRule, layer, ps)
+    is_compatible(rule, layer, ps) || throw(LRPCompatibilityError(rule, layer))
+    return nothing
 end
-function get_modified_layers(rules, static::StaticLayer)
-    throw(ArgumentError("Expected an LRP rule for layer $(static.layer), got $rules."))
+function check_rule_compat(rules, layer, ps)
+    throw(ArgumentError("Expected an LRP rule for layer $layer, got $rules."))
 end
+
+# Wrap the model in rule-carrying nodes by zipping rules and layers along the
+# model structure: leaves become `RuledLayer`s, branch connections become
+# `RuledConnection`s. Assumes `check_rule_compat` has validated the structure.
+function wrap_children(layers::NamedTuple, rules::NamedTuple)
+    return NamedTuple{keys(layers)}(map(wrap_rules, values(layers), values(rules)))
+end
+wrap_rules(model::Chain, rules::NamedTuple) = Chain(; wrap_children(model.layers, rules)...)
+function wrap_rules(p::Parallel, rules::NamedTuple)
+    return Parallel(RuledConnection(p.connection); wrap_children(p.layers, rules)...)
+end
+function wrap_rules(sc::SkipConnection, rules)
+    return SkipConnection(wrap_rules(sc.layers, rules), RuledConnection(sc.connection))
+end
+function wrap_rules(sc::SkipConnection, rule::AbstractLRPRule)
+    return invoke(wrap_rules, Tuple{SkipConnection,Any}, sc, rule)
+end
+# A single rule assigned to a container treats the sub-model as one
+# differentiation unit; `Chain`/`Parallel` methods disambiguate against the
+# container methods above.
+wrap_rules(layer, rule::AbstractLRPRule) = RuledLayer(rule, layer)
+wrap_rules(layer::Chain, rule::AbstractLRPRule) = RuledLayer(rule, layer)
+wrap_rules(layer::Parallel, rule::AbstractLRPRule) = RuledLayer(rule, layer)
 
 #=============================#
 # LRP struct and constructors #
@@ -68,21 +92,17 @@ after relevance has been distributed between the skip and wrapped branches.
 [1] G. Montavon et al., Layer-Wise Relevance Propagation: An Overview
 [2] W. Samek et al., Explaining Deep Neural Networks and Beyond: A Review of Methods and Applications
 """
-struct LRP{M<:Chain,P,S,R<:NamedTuple,L<:NamedTuple,ML<:NamedTuple} <: AbstractXAIMethod
-    # `model`/`ps`/`st` are the Lux triple the analyzer was built from. The
-    # backward pass only reads `layers`/`modified_layers` below, but `model` is
-    # still needed: `show` iterates `model.layers` to print layer names, and
-    # `CRP` uses `length(model)`. `ps`/`st` are kept to preserve the full triple.
+struct LRP{M<:Chain,P,S,R<:NamedTuple,W<:Chain} <: AbstractXAIMethod
+    # `model`/`ps`/`st` are the Lux triple the analyzer was built from.
+    # `wrapped_model` is the model with each rule-carrying leaf wrapped in a
+    # `RuledLayer`; since the wrappers are `ps`/`st`-transparent, the original
+    # `ps`/`st` trees apply to it unchanged. One Enzyme reverse pass over
+    # `wrapped_model` computes the explanation (see `call_analyzer` below).
     model::M
     ps::P
     st::S
     rules::R
-    # `lrp!` needs both the original layer (for the forward pass and for rules
-    # that differentiate through the unmodified layer) and its pre-computed
-    # rule-modified counterpart, whose entries can also be `nothing` or a
-    # NamedTuple of variants. Both mirror the keys of `model.layers`.
-    layers::L
-    modified_layers::ML
+    wrapped_model::W
     normalize_output_relevance::Bool
 
     function LRP(
@@ -99,18 +119,10 @@ struct LRP{M<:Chain,P,S,R<:NamedTuple,L<:NamedTuple,ML<:NamedTuple} <: AbstractX
             check_output_softmax(model)
             check_lrp_compat(model; verbose=verbose)
         end
-        static = StaticLayer(model, ps, st)
-        layers = static_children(static)
-        modified_layers = get_modified_layers(rules, static)
-        return new{
-            typeof(model),
-            typeof(ps),
-            typeof(st),
-            typeof(rules),
-            typeof(layers),
-            typeof(modified_layers),
-        }(
-            model, ps, st, rules, layers, modified_layers, normalize_output_relevance
+        check_rule_compat(rules, model, ps)
+        wrapped_model = wrap_rules(model, rules)
+        return new{typeof(model),typeof(ps),typeof(st),typeof(rules),typeof(wrapped_model)}(
+            model, ps, st, rules, wrapped_model, normalize_output_relevance
         )
     end
 end
@@ -142,130 +154,87 @@ end
 # Call to the LRP analyzer #
 #==========================#
 
+# The scalar loss whose Enzyme gradient w.r.t. `x` is the explanation:
+# `dot(mask, y)` seeds the reverse pass with the masked output relevance Rᴺ⁺¹,
+# and the rule-carrying nodes in `model` replace every VJP on the way down.
+function lrp_loss(model, x, ps, st, cap, ns, normalize)
+    y = first(apply(model, x, ps, st))
+    mask = detached_mask!(cap, y, ns, normalize)
+    return dot(mask, y)
+end
+
+# Capture the model output and build the output relevance seed.
+# Marked `EnzymeRules.inactive`, which detaches the mask from the
+# differentiated graph: the seed is a constant w.r.t. the model output.
+function detached_mask!(cap, y, ns::AbstractOutputSelector, normalize::Bool)
+    cap[] = copy(y)
+    return relevance_seed(y, ns(y), normalize)
+end
+EnzymeRules.inactive(::typeof(detached_mask!), args...) = nothing
+
+function relevance_seed(y, idx, normalize::Bool)
+    seed = zero(y)
+    if normalize
+        seed[idx] .= 1
+    else
+        seed[idx] .= y[idx]
+    end
+    return seed
+end
+
+model_output(model, x, ps, st) = first(apply(model, x, ps, st))
+
+# Typed capture for the model output. The type is over-approximated by the
+# compiler, so the `Ref` stays valid (if less precise) when inference fails.
+function output_ref(model, x, ps, st)
+    T = Base.promote_op(model_output, typeof(model), typeof(x), typeof(ps), typeof(st))
+    T === Union{} && return Ref{Any}()
+    return Ref{T}()
+end
+
+# Insert relevance taps between the outermost children of the wrapped model.
+# The first child needs no tap: the relevance at its input is the input shadow.
+function insert_taps(model::Chain, store)
+    layers = model.layers
+    ks = keys(layers)
+    tapped = ntuple(
+        i -> i == 1 ? layers[i] : TappedLayer(layers[i], store, i - 1), length(ks)
+    )
+    return Chain(; NamedTuple{ks}(tapped)...)
+end
+
 function call_analyzer(
     input::AbstractArray, lrp::LRP, ns::AbstractOutputSelector; layerwise_relevances=false
 )
-    as = get_activations(lrp.layers, input)   # compute activations aᵏ for all layers k
-    Rs = similar.(as)
-    mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
-    lrp_backward_pass!(Rs, as, lrp.rules, lrp.layers, lrp.modified_layers)
-    extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
-    return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
-end
-
-function mask_output_neuron!(
-    R_out, a_out, ns::AbstractOutputSelector, normalize_output_relevance::Bool
-)
-    fill!(R_out, 0)
-    idx = ns(a_out)
-    if normalize_output_relevance
-        R_out[idx] .= 1
-    else
-        R_out[idx] .= a_out[idx]
+    (; ps, st, normalize_output_relevance) = lrp
+    model = lrp.wrapped_model
+    store = layerwise_relevances ? Vector{Any}(undef, length(model.layers) - 1) : nothing
+    if !isnothing(store)
+        model = insert_taps(model, store)
     end
-    return R_out
-end
 
-function lrp_backward_pass!(Rs, as, rules, layers::NamedTuple, modified_layers)
-    # Apply LRP rules in backward-pass, inplace-updating relevances `Rs[k]` = Rᵏ
-    rs, ls, ms = values(rules), values(layers), values(modified_layers)
-    for k in length(ls):-1:1
-        lrp!(Rs[k], rs[k], ls[k], ms[k], as[k], Rs[k + 1])
-    end
-    return Rs
-end
-
-#==========================================#
-# Special calls to Lux's "dataflow layers" #
-#==========================================#
-
-# Rules for `Chain` and `Parallel` layers are nested NamedTuples
-# mirroring the model structure (like `ps` and `st`).
-
-function lrp!(
-    Rᵏ, rules::NamedTuple, chain::StaticLayer{<:Chain}, modified_chain::NamedTuple, aᵏ, Rᵏ⁺¹
-)
-    layers = static_children(chain)
-    as = get_activations(layers, aᵏ)
-    Rs = similar.(as)
-    last(Rs) .= Rᵏ⁺¹
-
-    lrp_backward_pass!(Rs, as, rules, layers, modified_chain)
-    return Rᵏ .= first(Rs)
-end
-
-function lrp!(
-    Rᵏ,
-    rules::NamedTuple,
-    parallel::StaticLayer{<:Parallel},
-    modified_parallel::NamedTuple,
-    aᵏ,
-    Rᵏ⁺¹,
-)
-    children = static_children(parallel)
-
-    # Re-compute contributions of parallel branches to output activation
-    aᵏ⁺¹s = map(child -> child(aᵏ), values(children))
-
-    # Distribute the relevance Rᵏ⁺¹ to the i-th branch of the parallel layer
-    # according to the contribution aᵏ⁺¹ᵢ of branch i to the output activation aᵏ⁺¹:
-    #   Rᵏ⁺¹s[i] = Rᵏ⁺¹ .* aᵏ⁺¹s[i] ./ aᵏ⁺¹ = c .* aᵏ⁺¹s[i]
-    c = Rᵏ⁺¹ ./ stabilize_denom(sum(aᵏ⁺¹s))
-    Rᵏ⁺¹s = map(aᵏ⁺¹ -> c .* aᵏ⁺¹, aᵏ⁺¹s)
-
-    # Compute individual input relevances Rᵏ for all branches of the parallel layer
-    Rᵏs = [similar(aᵏ) for _ in aᵏ⁺¹s] # pre-allocate output
-    for (Rᵏᵢ, rule, child, modified_child, Rᵏ⁺¹ᵢ) in
-        zip(Rᵏs, values(rules), values(children), values(modified_parallel), Rᵏ⁺¹s)
-        # In-place update Rᵏᵢ and therefore Rᵏs
-        lrp!(Rᵏᵢ, rule, child, modified_child, aᵏ, Rᵏ⁺¹ᵢ)
-    end
-    # Sum up individual input relevances
-    return Rᵏ .= sum(Rᵏs)
-end
-
-function lrp_skip_connection!(
-    Rᵏ, rules, sc::StaticLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
-)
-    inner = static_inner(sc)
-
-    # Compute contributions of the wrapped layer and the skip connection to the
-    # output activation. For the skip connection, activations stay constant:
-    # aᵏ⁺¹_skip = aᵏ_skip = aᵏ
-    aᵏ⁺¹_inner = inner(aᵏ)
-    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_inner + aᵏ) # using aᵏ = aᵏ⁺¹_skip
-
-    # Distribute relevance according to contribution to output activation.
-    # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
-    Rᵏ⁺¹_inner = c .* aᵏ⁺¹_inner
-    Rᵏ_skip = c .* aᵏ # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip
-
-    # Compute input relevance Rᵏ of the wrapped layer
-    Rᵏ_inner = similar(Rᵏ_skip)
-    lrp!(Rᵏ_inner, rules, inner, modified, aᵏ, Rᵏ⁺¹_inner)
-
-    # Sum up input relevances
-    return Rᵏ .= Rᵏ_inner .+ Rᵏ_skip
-end
-
-# `SkipConnection` is transparent in `rules` and `modified_layers` (like in
-# `ps`/`st`), so `lrp!` can be reached with a single rule paired with a
-# `StaticLayer{<:SkipConnection}`. Route each rule type with its own generic
-# `lrp!(Rᵏ, rule, layer::StaticLayer, ...)` method explicitly to the skip
-# connection handler to avoid method ambiguities.
-for R in (
-    :NamedTuple,
-    :AbstractLRPRule,
-    :PassRule,
-    :ZBoxRule,
-    :ZPlusRule,
-    :AlphaBetaRule,
-    :GeneralizedGammaRule,
-)
-    @eval function lrp!(
-        Rᵏ, rules::$R, sc::StaticLayer{<:SkipConnection}, modified, aᵏ, Rᵏ⁺¹
+    dx = make_zero(input)
+    cap = output_ref(model, input, ps, st)
+    autodiff(
+        Reverse,
+        lrp_loss,
+        Active,
+        Const(model),
+        Duplicated(input, dx),
+        Const(ps),
+        Const(st),
+        Const(cap),
+        Const(ns),
+        Const(normalize_output_relevance),
     )
-        return lrp_skip_connection!(Rᵏ, rules, sc, modified, aᵏ, Rᵏ⁺¹)
+    output = cap[]
+    output_selection = ns(output)
+
+    extras = if isnothing(store)
+        nothing
+    else
+        seed = relevance_seed(output, output_selection, normalize_output_relevance)
+        (; layerwise_relevances=(dx, store..., seed))
     end
+    return Explanation(dx, input, output, output_selection, :LRP, :attribution, extras)
 end
-# ISSUE: is this just an issue due to the existance of the `StaticLayer` wrapper?

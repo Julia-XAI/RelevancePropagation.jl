@@ -1,7 +1,7 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: StaticLayer, lrp!, modify_layer
+using RelevancePropagation: propagate, node_forward
 using Lux
 using StableRNGs: StableRNG
 
@@ -63,18 +63,20 @@ end
     @test size(lwr[2]) == (8, 1)
 
     # The analyzer applies the same rules as a manual backward pass
-    layers = analyzer.layers
-    as = (input, layers[1](input), layers[2](layers[1](input)))
-    zs = layers[3](as[3])
-    R3 = zero(zs)
-    R3[argmax(zs)] = 1
-    Rs = (similar(as[1]), similar(as[2]), similar(as[3]))
+    layers = values(model.layers)
+    as = Vector{Any}(undef, 4) # layer inputs, as[4] = model output
+    zs = Vector{Any}(undef, 3) # cached pre-activations
+    as[1] = input
+    for k in 1:3
+        zs[k], as[k + 1] = node_forward(layers[k], as[k], ps[k], st[k])
+    end
+    R = zero(as[4])
+    R[argmax(as[4])] = 1
     for k in 3:-1:1
-        Rᵏ⁺¹ = k == 3 ? R3 : Rs[k + 1]
-        lrp!(Rs[k], ZeroRule(), layers[k], modify_layer(ZeroRule(), layers[k]), as[k], Rᵏ⁺¹)
+        R = propagate(ZeroRule(), layers[k], as[k], zs[k], ps[k], st[k], R)
     end
     expl = analyze(input, analyzer)
-    @test expl.val ≈ Rs[1]
+    @test expl.val ≈ R
 end
 
 @testset "Batches" begin

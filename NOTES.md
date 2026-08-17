@@ -101,31 +101,90 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 - **Reshaping:** `Flux.flatten`/`MLUtils.flatten` → `Lux.FlattenLayer`
   (plus `ReshapeLayer`) in the `ReshapingLayer` union.
 
-## AD differences (Zygote → Enzyme)
+## AD architecture (Zygote → Enzyme)
 
-- All Enzyme code is confined to `src/autodiff.jl`. The only AD primitive
-  is a VJP w.r.t. a layer's *input*, via split-mode thunks
-  (`ReverseSplitWithPrimal`) so the seed can depend on the primal output,
-  matching Zygote's `pullback` semantics with one true forward pass.
-- **Pullbacks are single-use.** Zygote's `back` could be re-invoked with
-  different seeds; an Enzyme reverse thunk consumes the tape recorded by
-  its forward thunk. Verified empirically: re-running a reverse thunk on an
-  already-consumed tape happens to return correct values for some layers
-  (`Dense`) but aborts the Julia process for others (`Scale`), so it must
-  never be done. Rules that need VJPs with two different seeds through the
-  same layer (`AlphaBetaRule`, `GeneralizedGammaRule`) construct one
-  single-use pullback per seed; the cost is one extra forward pass per
-  layer, and the thunk is compiled only once per layer and input type.
-- **Layers are differentiated as immutable `StaticLayer(layer, ps, st)`
-  bundles** (named to avoid confusion with `Lux.Experimental.FrozenLayer`) annotated `Enzyme.Const`. `Lux.StatefulLuxLayer` was rejected:
-  it mutates itself on every call, which is unsafe to annotate `Const`
-  across split-mode fwd/rev boundaries. LRP never uses updated states, so
-  `StaticLayer` discards them.
-- **Enzyme accumulates (`+=`) into shadow buffers** — any reuse of shadows
-  across calls requires `make_zero!` in between, or relevances silently
-  accumulate.
-- `back(s)` returns the input gradient directly, so v3's
-  `c = only(back(s))` became `c = back(s)` throughout the rules.
+The v4 engine is a **hijacked Enzyme reverse pass**: LRP is reverse-mode AD
+in which each layer's true VJP is replaced by the rule's relevance map, with
+the relevance `Rᵏ` carried as the cotangent at `aᵏ`. (An earlier iteration of
+the port hand-rolled its own backward-pass engine — `get_activations`,
+`lrp_backward_pass!`, per-layer split-mode `layer_pullback` thunks, and
+structural `lrp!` methods for `Chain`/`Parallel`/`SkipConnection` — and used
+Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
+
+- All Enzyme code is confined to `src/autodiff.jl`. One
+  `Enzyme.autodiff` call per `analyze` differentiates the scalar loss
+  `dot(mask, model(x))` over the *wrapped* model; the input shadow `dx` is
+  the explanation. The mask (output relevance seed) is built by an
+  `EnzymeRules.inactive` function, detaching it from differentiation.
+- **Each rule is an `EnzymeRules` custom rule** on `lrp_node`: the
+  augmented forward splits weight layers into affine part + activation and
+  caches the pre-activation `z` on the tape; the reverse calls the pure
+  rule body `propagate` and accumulates into the input shadow. Rules whose
+  parameter modification is the identity (Zero/Epsilon, the dominant case)
+  reuse the cached `z` — no modified forward pass at all.
+- **Branch routing needs no structural code**: Lux's `apply` plumbing is
+  differentiated as-is; shadow accumulation (`.+=`) implements "sum branch
+  relevances", and a tiny vararg custom rule on the wrapped `connection` of
+  `Parallel`/`SkipConnection` implements the proportional relevance split
+  from the tape, with no re-forwarding of branches.
+- **Inner VJPs**: rules pull seeds back through (modified) layers via
+  `input_vjp`. Activation-free `Dense`/`Scale`/`Conv`/`ConvTranspose` use
+  hand-written fast paths (`Wᵀs`, broadcast, `∇conv_data`, `conv`) —
+  cross-checked against the AD fallback in `test_autodiff.jl`; everything
+  else uses `seeded_pullback`, one *combined-mode* nested `autodiff` over
+  `dot(layer(x), s)`. Combined mode re-runs the layer forward, but split
+  thunks (single-use tapes, see git history: re-running a consumed tape
+  aborts Julia for some layers) and their two-phase bookkeeping are gone;
+  multi-seed rules (`AlphaBetaRule`, `GeneralizedGammaRule`) just call
+  `input_vjp` once per seed, which with fast paths is FLOP-optimal
+  (4 forwards + 4 transposes for αβ).
+- **Wrappers take explicit `ps`/`st` arguments, mirroring Lux.**
+  `RuledLayer <: AbstractLuxWrapperLayer{:layer}` is parameter- and
+  state-transparent, so the user's `ps`/`st` trees apply to the wrapped
+  model unchanged; `ps`/`st` enter the custom rules as `Enzyme.Const`
+  arguments. Benchmarked against a `StaticLayer`-style capturing wrapper:
+  runtime-identical, so the explicit-argument design costs nothing (see
+  "Single-layer benchmarks" below).
+- **The wrapper returns an empty state.** Returning the real `st` threads
+  `Const` state arrays (BatchNorm running statistics) into the active
+  return structure and triggers `EnzymeRuntimeActivityError`. LRP is
+  inference-only; state updates were always discarded.
+- **Custom-rule return activity must cover `DuplicatedNoNeed`**: methods
+  are declared `::Type{<:Union{Duplicated,DuplicatedNoNeed}}` and branch on
+  `needs_primal`/`needs_shadow` (config params are static, branches fold).
+- `layerwise_relevances` is implemented with `TappedLayer` wrappers between
+  the outermost children (identity primal, recording reverse), rebuilt per
+  call when requested.
+- LuxLib warns once (`training is set to Val{false} but is being used
+  within an autodiff call`) when testmode BatchNorm is differentiated —
+  harmless for LRP, which intentionally differentiates the inference graph.
+
+## Single-layer benchmarks (GammaRule)
+
+Design variants measured on `Dense(512 => 512, relu)` (batch 64) and
+`Conv((3,3), 32 => 32, relu; pad=1)` (32×32×32×8), Apple M3 Pro, warm
+(`.handoff/bench_gamma.jl`, deleted with the handoff; numbers kept here).
+GammaRule is the simplest parameter-modifying rule, so it isolates the cost
+of lazy `modify_params` and of the VJP strategy:
+
+| variant (rule body)               | Dense min | Conv min |
+|-----------------------------------|-----------|----------|
+| old engine (split thunks, precomputed modified layer) | 212 µs | 6.5 ms |
+| hijack, lazy ρps, nested combined AD | 319 µs | 9.6 ms |
+| hijack, lazy ρps, fast-path VJP   | 199 µs    | 5.9 ms   |
+| hijack, precomputed ρps, fast-path VJP | 173 µs | 6.0 ms |
+
+- The nested combined-AD fallback pays a redundant forward (the rule body
+  already computed `z̃`) — 1.5–1.6× slower than split thunks. The
+  **fast-path VJPs are what make the hijack design a net win**; the AD
+  fallback only remains for layers without weights, where
+  parameter-modifying rules don't apply.
+- Lazy `modify_params` costs ~27 µs / 1 MiB per call on the 512×512 Dense
+  and nothing measurable on Conv; precomputation would keep a permanent
+  modified copy of all weights for a ≤5% end-to-end gain — not worth it.
+- A ps-capturing wrapper (StaticLayer-style) is runtime-identical to the
+  ps-transparent explicit-argument wrapper (602 vs 624 µs min end-to-end on
+  the Dense chain); the explicit design wins on structure alone.
 
 ## Structural code changes
 
@@ -141,27 +200,36 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
   (see `PLAN_MODELSURGEON.md`).
 - `ModelIndex` → `Functors.KeyPath` (what Lux's own `layer_map` uses) for
   `LayerMap`/`show_layer_indices`.
-- `copy_layer` is gone: rules modify `ps` NamedTuples and wrap them in new
-  `StaticLayer`s; the activation swap is the one generic `setproperties`
-  call above.
+- `copy_layer` is gone: rules modify `ps` NamedTuples lazily inside the
+  reverse pass (`modify_params`, returning `ps` itself when the rule
+  doesn't modify parameters); the activation swap is the one generic
+  `setproperties` call above (`remove_activation`).
 - Dependencies: dropped Flux, Zygote, MacroTools, MLUtils,
   DifferentiationInterface (never added — raw Enzyme by design); added
   Lux, Enzyme, Functors, ConstructionBase. Zygote survives as a
-  *test-only* dependency to cross-check `layer_pullback`.
-- CRP kept the v3 algorithm unchanged: the analyzer's
-  `rules`/`layers`/`modified_layers` NamedTuples are unpacked positionally
-  with `values()` for the `k`-indexed backward loops, and activations come
-  from `get_activations` on the `StaticLayer` NamedTuple. The flat-model
-  assumption (positional `layer::Int`) is now documented in the docstring.
+  *test-only* dependency to cross-check `seeded_pullback` and the
+  `input_vjp` fast paths.
+- CRP kept the v3 algorithm unchanged: masking individual concepts at
+  layer `l` needs explicit control over intermediate relevances, so CRP
+  does not reuse the hijacked reverse pass. Instead it runs its own
+  `k`-indexed positional loops over the children of the analyzer's wrapped
+  model — a forward pass collecting activations and pre-activations via
+  `node_forward`, then per-concept backward passes through `propagate`
+  (containers fall back to `seeded_pullback`). The flat-model assumption
+  (positional `layer::Int`) is now documented in the docstring.
 
 ## Compilation latency
 
-Enzyme compiles one thunk per (rule-variant × layer type × input type) on
-the *first* `analyze` call. On a random-init VGG16 (224×224×3×1 input,
-`EpsilonPlusFlat()` composite, Apple M3 Pro, Julia 1.12) the first
-`analyze` takes ~32 s; warm calls take ~1.8 s. Thunks are cached per input
-element type and dimensionality, so batch-size changes of the same
-eltype/ndims do not recompile.
+Enzyme compiles the reverse pass on the *first* `analyze` call: one
+whole-model thunk specialized on the wrapped model type (rules are type
+parameters, so a different rule assignment recompiles), plus nested
+combined-mode thunks for layers taking the `seeded_pullback` fallback.
+On a random-init VGG16 (224×224×3×1 input, `EpsilonPlusFlat()` composite,
+Apple M3 Pro, Julia 1.12) the first `analyze` takes ~40 s (the scrapped
+split-thunk engine took ~32 s); warm calls take ~1.8 s, runtime-identical
+to the old engine. Thunks are cached per input element type and
+dimensionality, so batch-size changes of the same eltype/ndims do not
+recompile.
 
 ## Test suite / reference values
 

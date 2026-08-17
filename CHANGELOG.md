@@ -22,10 +22,24 @@ Flux.jl models are no longer supported.
   `Functors.KeyPath` instead of `ModelIndex`. 
   Integers and tuples of integers are converted for convenience.
 * ![BREAKING][badge-breaking] Custom layers must subtype `Lux.AbstractLuxLayer` and follow the Lux layer interface.
+* ![BREAKING][badge-breaking] The custom rule API modifies parameters instead of layers:
+  `modify_layer` was removed in favor of `modify_params(rule, ps)`,
+  which lazily modifies the parameter `NamedTuple` during the backward pass.
+  `modify_weight` and `modify_bias` keep their semantics.
+  Rule compatibility with a layer is declared via `is_compatible(rule, layer, ps)`.
+* ![BREAKING][badge-breaking] Fully custom rules implement the pure function
+  `propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)` returning `Rᵏ`,
+  replacing the mutating `lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)`.
 * ![BREAKING][badge-breaking] Lux `LayerNorm` differs from Flux `LayerNorm`:
   its default `dims=Colon()` normalizes over all dimensions including the batch dimension, 
   and epsilon is placed inside the square root (`(x - μ) / √(σ² + ϵ)`). 
   `LayerNormRule` follows the layer's configuration, so relevances for "the same" architecture can differ from v3.
+* ![Enhancement][badge-enhancement] The LRP backward pass is implemented as a single Enzyme reverse pass over the model,
+  in which per-layer `EnzymeRules` custom rules replace each layer's true VJP with its LRP rule,
+  propagating relevances as cotangents.
+  Structural backward-pass code for `Chain`, `Parallel` and `SkipConnection` is no longer needed.
+  Rules that don't modify parameters or inputs reuse the pre-activations cached during the forward pass,
+  and the inner VJPs of `Dense`, `Scale`, `Conv` and `ConvTranspose` use hand-written fast paths.
 * ![Enhancement][badge-enhancement] BatchNorm fusion in `canonize` is now exact: 
   it uses the layer's running statistics and includes `epsilon`
   (v3 ignored it). 

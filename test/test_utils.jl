@@ -1,7 +1,7 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: StaticLayer, activation_fn
+using RelevancePropagation: activation_fn
 using RelevancePropagation: has_weight, has_bias
 using RelevancePropagation: check_output_softmax
 using RelevancePropagation: stabilize_denom, masked_copy
@@ -10,22 +10,22 @@ using Lux
 using LuxCore: AbstractLuxWrapperLayer
 using StableRNGs: StableRNG
 
-static_layer(layer) = StaticLayer(layer, Lux.setup(StableRNG(123), layer)...)
+layer_ps(layer) = first(Lux.setup(StableRNG(123), layer))
 
-# RP extends ModelSurgeon's `activation_fn` with a `StaticLayer` method
-@test activation_fn(static_layer(Dense(5 => 2, gelu))) == gelu
-@test isnothing(activation_fn(static_layer(MaxPool((2, 2)))))
+# ModelSurgeon's `activation_fn` on plain Lux layers
+@test activation_fn(Dense(5 => 2, gelu)) == gelu
+@test isnothing(activation_fn(MaxPool((2, 2))))
 
-# has_weight / has_bias on StaticLayer
-@test has_weight(static_layer(Dense(2 => 2)))
-@test has_bias(static_layer(Dense(2 => 2)))
-@test has_weight(static_layer(Dense(2 => 2; use_bias=false)))
-@test !has_bias(static_layer(Dense(2 => 2; use_bias=false)))
-@test has_weight(static_layer(Scale(2)))
-@test has_bias(static_layer(Scale(2)))
-@test has_weight(static_layer(Conv((3, 3), 3 => 2)))
-@test !has_weight(static_layer(MaxPool((2, 2))))
-@test !has_weight(static_layer(BatchNorm(2))) # BatchNorm ps are (scale, bias)
+# has_weight / has_bias on Lux parameter NamedTuples
+@test has_weight(layer_ps(Dense(2 => 2)))
+@test has_bias(layer_ps(Dense(2 => 2)))
+@test has_weight(layer_ps(Dense(2 => 2; use_bias=false)))
+@test !has_bias(layer_ps(Dense(2 => 2; use_bias=false)))
+@test has_weight(layer_ps(Scale(2)))
+@test has_bias(layer_ps(Scale(2)))
+@test has_weight(layer_ps(Conv((3, 3), 3 => 2)))
+@test !has_weight(layer_ps(MaxPool((2, 2))))
+@test !has_weight(layer_ps(BatchNorm(2))) # BatchNorm ps are (scale, bias)
 
 # check_output_softmax
 @test_throws ArgumentError check_output_softmax(Chain(Dense(2 => 2), softmax))

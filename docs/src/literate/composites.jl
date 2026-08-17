@@ -48,10 +48,12 @@ LRP(model_flat, ps_flat, st_flat, rules)
 # However, this approach only works for models that can be fully flattened.
 # For nested models and models containing `Parallel` and `SkipConnection` layers,
 # rules are assigned as a `NamedTuple` that mirrors the structure of the model —
-# the same structure Lux uses for `ps` and `st`:
+# the same structure Lux uses for `ps` and `st`.
+# The `layer_i` names are Lux's own keys for the children of a `Chain`
+# (children live in a `NamedTuple`, not a vector),
+# which is what allows rules to line up with the entries of `ps` and `st`:
 rules = (;
     layer_1=(;
-    # ISSUE: are these names needed? In this example, they don't seem to carry any additional information.
         layer_1=FlatRule(),
         layer_2=ZPlusRule(),
         layer_3=ZeroRule(),

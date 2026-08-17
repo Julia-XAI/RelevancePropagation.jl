@@ -48,7 +48,7 @@ struct MyGammaRule <: AbstractLRPRule end
 # 1. [`modify_input(rule::MyGammaRule, input)`](@ref RelevancePropagation.modify_input)
 # 1. [`modify_parameters(rule::MyGammaRule, parameter)`](@ref RelevancePropagation.modify_parameters)
 # 1. [`modify_denominator(rule::MyGammaRule, denominator)`](@ref RelevancePropagation.modify_denominator)
-# 1. [`is_compatible(rule::MyGammaRule, layer)`](@ref RelevancePropagation.is_compatible)
+# 1. [`is_compatible(rule::MyGammaRule, layer, ps)`](@ref RelevancePropagation.is_compatible)
 #
 # By default:
 # 1. `modify_input` doesn't change the input
@@ -96,40 +96,35 @@ analyzer = LRP(model, ps, st, rules)
 heatmap(input, analyzer)
 
 # ## Performance tips
-# 1. Make sure functions like `modify_parameters` don't promote the type of weights
-#    (e.g. from `Float32` to `Float64`).
-# 2. If your rule `MyRule` requires neither a modified layer nor the original one,
-#    defining `modify_layer(::MyRule, layer) = nothing`
-#    can reduce memory allocations and improve performance.
+# Make sure functions like `modify_parameters` don't promote the type of weights
+# (e.g. from `Float32` to `Float64`).
+# Rules whose `modify_parameters` (or `modify_weight` and `modify_bias`)
+# is the identity get a fast path for free:
+# the pre-activation cached by the Enzyme reverse pass is reused,
+# skipping the modified forward pass entirely.
 
-# ## [Advanced layer modification](@id custom-rules-advanced)
+# ## [Advanced parameter modification](@id custom-rules-advanced)
 # For more granular control over weights and biases,
 # [`modify_weight`](@ref RelevancePropagation.modify_weight) and
 # [`modify_bias`](@ref RelevancePropagation.modify_bias) can be used.
-#
-# If the layer doesn't use weights (`ps.weight`) and biases (`ps.bias`),
-# RelevancePropagation provides a lower-level variant of
-# [`modify_parameters`](@ref RelevancePropagation.modify_parameters) called
-# [`modify_layer`](@ref RelevancePropagation.modify_layer).
-# This function operates on a `StaticLayer`, a wrapper type internal to
-# RelevancePropagation.jl that bundles a Lux layer with its parameters and states,
-# and is expected to return a new, modified `StaticLayer`.
-# Layers without a `weight` entry in their parameters are returned unmodified.
+# These operate on the arrays in a layer's `ps` NamedTuple;
+# rules never hold copies of model parameters —
+# modified parameters are computed lazily via
+# [`modify_params`](@ref RelevancePropagation.modify_params) on each call.
+# Parameters without a `weight` entry are returned unmodified.
 # To add compatibility checks between rule and layer types, extend
 # [`is_compatible`](@ref RelevancePropagation.is_compatible).
 
-#md # !!! warning "Extending modify_layer"
+#md # !!! warning "Extending modify_weight and modify_bias"
 #md #
-#md #     Use of a custom function `modify_layer` will overwrite functionality of `modify_parameters`,
-#md #     `modify_weight` and `modify_bias` for the implemented combination of rule and layer types.
-#md #     This is due to the fact that internally, `modify_weight` and `modify_bias` are called
-#md #     by the default implementation of `modify_layer`.
-#md #     `modify_weight` and `modify_bias` in turn call `modify_parameters` by default.
+#md #     `modify_weight` and `modify_bias` overwrite the functionality of
+#md #     `modify_parameters` for the implemented rule type, since they call
+#md #     `modify_parameters` by default.
 #md #
 #md #     The default call structure looks as follows:
 #md #     ```
 #md #     ┌─────────────────────────────────────────┐
-#md #     │              modify_layer               │
+#md #     │              modify_params              │
 #md #     └─────────┬─────────────────────┬─────────┘
 #md #               │ calls               │ calls
 #md #     ┌─────────▼─────────┐ ┌─────────▼─────────┐
@@ -140,10 +135,7 @@ heatmap(input, analyzer)
 #md #     │ modify_parameters │ │ modify_parameters │
 #md #     └───────────────────┘ └───────────────────┘
 #md #     ```
-#md #
-#md #     Therefore `modify_layer` should only be extended for a specific rule
-#md #     and a specific layer type.
 
 # ## Advanced LRP rules
-# To implement custom LRP rules that require more than `modify_layer`, `modify_input`
+# To implement custom LRP rules that require more than `modify_parameters`, `modify_input`
 # and `modify_denominator`, take a look at the [LRP developer documentation](@ref developer).

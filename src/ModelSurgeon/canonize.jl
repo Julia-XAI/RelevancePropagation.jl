@@ -219,9 +219,11 @@ function canonize_fuse(layer::Union{Dense,Conv}, ps_layer, bn::BatchNorm, ps_bn,
     activation_fn(layer) !== identity &&
         throw(ArgumentError("Can't fuse layer with activation $(activation_fn(layer))."))
     μ, σ² = st_bn.running_mean, st_bn.running_var
+    # `one.(μ)`/`zero.(μ)` (rather than `ones`/`zeros`) preserve the eltype and
+    # array type of the running statistics (e.g. `Float32`, GPU arrays);
+    # `ones(size(μ))` would allocate a CPU `Vector{Float64}`.
     γ = haskey(ps_bn, :scale) ? ps_bn.scale : one.(μ)  # BatchNorm(...; affine=false)
     β = haskey(ps_bn, :bias) ? ps_bn.bias : zero.(μ)
-    # ISSUE: can't we use `ones` and `zeros` here?
     scale = γ ./ sqrt.(σ² .+ bn.epsilon)
 
     weight = fuse_weight(layer, ps_layer.weight, scale)

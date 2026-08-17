@@ -82,7 +82,10 @@ end
 # keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1, :layer_2))  -> true
 # keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))            -> false
 
-# ISSUE: what are KeyPath and why do they have such long `Symbol` names if these are essentially just integer indices?
+# `Functors.KeyPath` is what `Lux.layer_map` uses to address layers, and the
+# `Symbol` entries (`:layer_1`, ...) are Lux's own keys: Chain children live
+# in a NamedTuple, so keys are Symbols, not integers, and custom layer names
+# (`Chain(; conv=..., fc=...)`) are addressed by the same mechanism.
 function keypath_in(a::KeyPath, b::KeyPath)
     length(a) < length(b) && return false
     return all(a[i] == b[i] for i in 1:length(b))
