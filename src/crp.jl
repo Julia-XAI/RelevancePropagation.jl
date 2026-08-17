@@ -36,17 +36,19 @@ end
 # Call to CRP analyzer #
 #======================#
 
-# CRP drives the same pure rule bodies as the hijacked Enzyme pass, but with
-# an explicit positional loop. This preserves its cost profile: the backward
-# pass above the concept layer is shared between all features, only the pass
-# below it runs once per feature — a single end-to-end reverse pass would
-# multiply the above-layer cost by the number of features.
+# CRP drives the same pure rule bodies as the Enzyme reverse pass,
+# but with an explicit positional loop.
+# This preserves its cost profile:
+# the backward pass above the concept layer is shared between all features,
+# only the pass below it runs once per feature —
+# a single end-to-end reverse pass would multiply the above-layer cost
+# by the number of features.
 
-# Propagate relevance through a single wrapped node. Leaves are propagated
-# directly through the pure rule body; containers are differentiated as one
-# unit through their wrapped form, driving the same custom rules as the full
-# hijacked pass.
-function node_backward(wrapped::RuledLayer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+# Propagate relevance through a single wrapped node.
+# Leaves are propagated directly through the pure rule body;
+# containers are differentiated as one unit through their wrapped form,
+# driving the same custom rules as the full reverse pass.
+function node_backward(wrapped::LayerWithRule, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     return propagate(wrapped.rule, wrapped.layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 end
 node_backward(wrapped, aᵏ, zᵏ, ps, st, Rᵏ⁺¹) = seeded_pullback(wrapped, aᵏ, ps, st, Rᵏ⁺¹)
@@ -57,7 +59,7 @@ function call_analyzer(
     # Unpack internal LRP analyzer, matching layers positionally
     (; model, ps, st, normalize_output_relevance) = crp.lrp
     layers = values(model.layers)
-    wrapped = values(crp.lrp.wrapped_model.layers)
+    wrapped = values(wrap_rules(model, crp.lrp.rules).layers)
     pss = values(ps)
     sts = values(st)
 

@@ -32,18 +32,20 @@ function check_rule_compat(rules, layer, ps)
     throw(ArgumentError("Expected an LRP rule for layer $layer, got $rules."))
 end
 
-# Wrap the model in rule-carrying nodes by zipping rules and layers along the
-# model structure: leaves become `RuledLayer`s, branch connections become
-# `RuledConnection`s. Assumes `check_rule_compat` has validated the structure.
+# Wrap the model in rule-carrying nodes
+# by zipping rules and layers along the model structure:
+# leaves become `LayerWithRule`s,
+# branch connections become `ConnectionWithRule`s.
+# Assumes `check_rule_compat` has validated the structure.
 function wrap_children(layers::NamedTuple, rules::NamedTuple)
     return NamedTuple{keys(layers)}(map(wrap_rules, values(layers), values(rules)))
 end
 wrap_rules(model::Chain, rules::NamedTuple) = Chain(; wrap_children(model.layers, rules)...)
 function wrap_rules(p::Parallel, rules::NamedTuple)
-    return Parallel(RuledConnection(p.connection); wrap_children(p.layers, rules)...)
+    return Parallel(ConnectionWithRule(p.connection); wrap_children(p.layers, rules)...)
 end
 function wrap_rules(sc::SkipConnection, rules)
-    return SkipConnection(wrap_rules(sc.layers, rules), RuledConnection(sc.connection))
+    return SkipConnection(wrap_rules(sc.layers, rules), ConnectionWithRule(sc.connection))
 end
 function wrap_rules(sc::SkipConnection, rule::AbstractLRPRule)
     return invoke(wrap_rules, Tuple{SkipConnection,Any}, sc, rule)
@@ -51,9 +53,9 @@ end
 # A single rule assigned to a container treats the sub-model as one
 # differentiation unit; `Chain`/`Parallel` methods disambiguate against the
 # container methods above.
-wrap_rules(layer, rule::AbstractLRPRule) = RuledLayer(rule, layer)
-wrap_rules(layer::Chain, rule::AbstractLRPRule) = RuledLayer(rule, layer)
-wrap_rules(layer::Parallel, rule::AbstractLRPRule) = RuledLayer(rule, layer)
+wrap_rules(layer, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
+wrap_rules(layer::Chain, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
+wrap_rules(layer::Parallel, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
 
 #=============================#
 # LRP struct and constructors #
@@ -92,17 +94,17 @@ after relevance has been distributed between the skip and wrapped branches.
 [1] G. Montavon et al., Layer-Wise Relevance Propagation: An Overview
 [2] W. Samek et al., Explaining Deep Neural Networks and Beyond: A Review of Methods and Applications
 """
-struct LRP{M<:Chain,P,S,R<:NamedTuple,W<:Chain} <: AbstractXAIMethod
+struct LRP{M<:Chain,P,S,R<:NamedTuple} <: AbstractXAIMethod
     # `model`/`ps`/`st` are the Lux triple the analyzer was built from.
-    # `wrapped_model` is the model with each rule-carrying leaf wrapped in a
-    # `RuledLayer`; since the wrappers are `ps`/`st`-transparent, the original
-    # `ps`/`st` trees apply to it unchanged. One Enzyme reverse pass over
-    # `wrapped_model` computes the explanation (see `call_analyzer` below).
+    # `call_analyzer` wraps each rule-carrying leaf of the model
+    # in a `LayerWithRule` via `wrap_rules`;
+    # since the wrappers are `ps`/`st`-transparent,
+    # the original `ps`/`st` trees apply to the wrapped model unchanged.
+    # One Enzyme reverse pass over the wrapped model computes the explanation.
     model::M
     ps::P
     st::S
     rules::R
-    wrapped_model::W
     normalize_output_relevance::Bool
 
     function LRP(
@@ -120,9 +122,8 @@ struct LRP{M<:Chain,P,S,R<:NamedTuple,W<:Chain} <: AbstractXAIMethod
             check_lrp_compat(model; verbose=verbose)
         end
         check_rule_compat(rules, model, ps)
-        wrapped_model = wrap_rules(model, rules)
-        return new{typeof(model),typeof(ps),typeof(st),typeof(rules),typeof(wrapped_model)}(
-            model, ps, st, rules, wrapped_model, normalize_output_relevance
+        return new{typeof(model),typeof(ps),typeof(st),typeof(rules)}(
+            model, ps, st, rules, normalize_output_relevance
         )
     end
 end
@@ -207,7 +208,7 @@ function call_analyzer(
     input::AbstractArray, lrp::LRP, ns::AbstractOutputSelector; layerwise_relevances=false
 )
     (; ps, st, normalize_output_relevance) = lrp
-    model = lrp.wrapped_model
+    model = wrap_rules(lrp.model, lrp.rules)
     store = layerwise_relevances ? Vector{Any}(undef, length(model.layers) - 1) : nothing
     if !isnothing(store)
         model = insert_taps(model, store)

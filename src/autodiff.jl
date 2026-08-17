@@ -1,17 +1,21 @@
-# LRP as a hijacked reverse-mode AD pass.
+# LRP by redefining Enzyme's VJPs.
 #
-# LRP *is* reverse-mode AD in which each layer's true VJP is replaced by the
-# rule's relevance-propagation map: the relevance Rᵏ is the cotangent at the
-# layer input aᵏ. The generic rule Rᵏ = ãᵏ ⊙ J̃ᵀ(Rᵏ⁺¹ ./ z̃) is a modified VJP:
-# massage the incoming cotangent (÷ z̃), pull it back through a ρ-modified
-# layer, massage the outgoing cotangent (⊙ ãᵏ).
+# LRP *is* reverse-mode AD in which each layer's true VJP
+# is replaced by the rule's relevance-propagation map:
+# the relevance Rᵏ is the cotangent at the layer input aᵏ.
+# The generic rule Rᵏ = ãᵏ ⊙ J̃ᵀ(Rᵏ⁺¹ ./ z̃) is a modified VJP:
+# massage the incoming cotangent (÷ z̃),
+# pull it back through a ρ-modified layer,
+# massage the outgoing cotangent (⊙ ãᵏ).
 #
-# The engine therefore runs *one* Enzyme reverse pass over the wrapped model
-# per `analyze` call. Each rule-carrying node is an `EnzymeRules` custom rule
+# The engine therefore runs *one* Enzyme reverse pass
+# over the wrapped model per `analyze` call.
+# Each rule-carrying node is an `EnzymeRules` custom rule
 # whose reverse computes the rule's relevance map (`propagate`, see rules.jl);
-# the input shadow `dx` accumulated by the pass *is* the explanation. Lux's
-# own `apply` plumbing routes dataflow through `Chain`/`Parallel`/
-# `SkipConnection`, and shadow accumulation implements "sum branch relevances"
+# the input shadow `dx` accumulated by the pass *is* the explanation.
+# Lux's own `apply` plumbing routes dataflow
+# through `Chain`/`Parallel`/`SkipConnection`,
+# and shadow accumulation implements "sum branch relevances"
 # without any structural special cases.
 
 #=====================#
@@ -24,36 +28,40 @@
 Apply `layer` to the input `x` with parameters `ps` and states `st`,
 discarding the updated layer states.
 
-This is the unit of the hijacked reverse pass: an `EnzymeRules` custom rule
-replaces its VJP with the LRP rule's relevance propagation ([`propagate`](@ref)),
+This is where Enzyme's VJPs are redefined:
+an `EnzymeRules` custom rule replaces this function's VJP
+with the LRP rule's relevance propagation ([`propagate`](@ref)),
 so differentiating a model in which each layer call is routed through
 `lrp_node` computes relevances instead of gradients.
 """
 lrp_node(rule, layer, x, ps, st) = first(apply(layer, x, ps, st))
 
 """
-    RuledLayer(rule, layer)
+    LayerWithRule(rule, layer)
 
 Lux wrapper layer that pairs a `layer` with the LRP `rule` assigned to it.
 Applying it routes the layer call through [`lrp_node`](@ref).
 
 The wrapper is parameter- and state-transparent
-(`AbstractLuxWrapperLayer{:layer}`), so the `ps`/`st` trees of the unwrapped
-model apply to the wrapped model unchanged.
+(`AbstractLuxWrapperLayer{:layer}`),
+so the `ps`/`st` trees of the unwrapped model
+apply to the wrapped model unchanged.
 """
-struct RuledLayer{R,L} <: AbstractLuxWrapperLayer{:layer}
+struct LayerWithRule{R,L} <: AbstractLuxWrapperLayer{:layer}
     rule::R
     layer::L
 end
-function LuxCore.apply(rl::RuledLayer, x, ps, st)
+function LuxCore.apply(wrapper::LayerWithRule, x, ps, st)
     # Return an empty state: LRP is inference-only and discards state updates.
     # Passing `st` through the return value would thread `Const` state arrays
     # (e.g. BatchNorm running statistics) into the active data flow of the
     # outer chain, triggering Enzyme runtime-activity errors. The real `st`
     # enters `lrp_node` only as a `Const` argument.
-    return lrp_node(rl.rule, rl.layer, x, ps, st), NamedTuple()
+    return lrp_node(wrapper.rule, wrapper.layer, x, ps, st), NamedTuple()
 end
-Base.show(io::IO, rl::RuledLayer) = print(io, "RuledLayer(", rl.rule, ", ", rl.layer, ")")
+function Base.show(io::IO, wrapper::LayerWithRule)
+    return print(io, "LayerWithRule(", wrapper.rule, ", ", wrapper.layer, ")")
+end
 
 # Layers whose forward pass is `σ.(affine(x))`: their forward is split into
 # affine part and activation so the pre-activation `z` is cached on the tape.
@@ -144,18 +152,19 @@ end
 #===================================#
 
 """
-    RuledConnection(connection)
+    ConnectionWithRule(connection)
 
-Callable wrapper for the `connection` of a `Parallel` or `SkipConnection`
-layer. Its `EnzymeRules` custom rule distributes the incoming relevance to the
-branches proportionally to their contribution `yᵢ` to the connection output:
-`Rᵢ = yᵢ ⊙ R ./ Σⱼyⱼ`. Shadow accumulation on the branch inputs then sums the
-branch relevances without re-running any forward passes.
+Callable wrapper for the `connection` of a `Parallel` or `SkipConnection` layer.
+Its `EnzymeRules` custom rule distributes the incoming relevance
+to the branches proportionally to their contribution `yᵢ`
+to the connection output: `Rᵢ = yᵢ ⊙ R ./ Σⱼyⱼ`.
+Shadow accumulation on the branch inputs then sums the branch relevances
+without re-running any forward passes.
 """
-struct RuledConnection{C}
+struct ConnectionWithRule{C}
     connection::C
 end
-(rc::RuledConnection)(ys...) = lrp_connection(rc.connection, ys...)
+(wrapper::ConnectionWithRule)(ys...) = lrp_connection(wrapper.connection, ys...)
 
 lrp_connection(connection, ys...) = connection(ys...)
 

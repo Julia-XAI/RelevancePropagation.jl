@@ -20,9 +20,10 @@ const LRP_DEFAULT_BETA = 1.0f0
 """
     propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 
-Propagate the relevance `Rᵏ⁺¹` at the output of a layer to the relevance `Rᵏ`
-at its input, according to the LRP rule. This is the "hijacked VJP" the
-Enzyme reverse pass calls for each rule-carrying node ([`lrp_node`](@ref)),
+Propagate the relevance `Rᵏ⁺¹` at the output of a layer
+to the relevance `Rᵏ` at its input, according to the LRP rule.
+This is the redefined VJP the Enzyme reverse pass calls
+for each rule-carrying node ([`lrp_node`](@ref)),
 and it is a pure function: `Rᵏ` is returned.
 
 # Arguments

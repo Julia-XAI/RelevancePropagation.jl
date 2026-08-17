@@ -107,7 +107,7 @@ that don't have a more specialized implementation.
 For more background information on automatic differentiation, refer to the 
 [JuML lecture on AD](https://adrianhill.de/julia-ml-course/L6_Automatic_Differentiation/).
 
-## LRP as a hijacked reverse pass
+## LRP by redefining Enzyme's VJPs
 Notice that the four steps above are a *modified VJP*:
 the incoming relevance $R^{k+1}$ plays the role of the output cotangent,
 which is massaged (divided by $\tilde z$),
@@ -117,7 +117,8 @@ In other words, **LRP is reverse-mode AD in which each layer's true VJP is
 replaced by the rule's relevance propagation map** —
 the relevance $R^k$ *is* the cotangent at the layer input $a^k$.
 
-RelevancePropagation.jl implements LRP exactly this way:
+RelevancePropagation.jl implements LRP exactly this way,
+by redefining the VJPs Enzyme uses:
 one Enzyme reverse pass over the model computes the entire explanation,
 and every rule is an [`EnzymeRules`](https://enzyme.mit.edu/julia/stable/generated/custom_rule/)
 custom rule that replaces the layer's VJP.
@@ -140,19 +141,19 @@ All Enzyme-specific code is contained in the file
 [`/src/autodiff.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/autodiff.jl).
 
 ### Rule-carrying nodes
-At construction time, the [`LRP`](@ref) analyzer *wraps* the model:
-each layer that has a rule assigned to it is wrapped in a `RuledLayer`,
-and each branch connection in a `RuledConnection`.
+When called, the [`LRP`](@ref) analyzer first *wraps* the model:
+each layer that has a rule assigned to it is wrapped in a `LayerWithRule`,
+and each branch connection in a `ConnectionWithRule`.
 The wrappers are parameter- and state-transparent,
 so the model's original `ps` and `st` trees apply to the wrapped model unchanged.
 
 ```@docs
-RelevancePropagation.RuledLayer
+RelevancePropagation.LayerWithRule
 RelevancePropagation.lrp_node
-RelevancePropagation.RuledConnection
+RelevancePropagation.ConnectionWithRule
 ```
 
-Applying a `RuledLayer` routes the layer call through the function `lrp_node`,
+Applying a `LayerWithRule` routes the layer call through the function `lrp_node`,
 whose Enzyme custom rule does two things:
 - The *augmented forward pass* ([`node_forward`](@ref RelevancePropagation.node_forward))
   splits the layer into its affine part and its activation function

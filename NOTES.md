@@ -103,7 +103,7 @@ no-bias `Dense`/`Conv` remain compatible with all weight-bias rules.
 
 ## AD architecture (Zygote → Enzyme)
 
-The v4 engine is a **hijacked Enzyme reverse pass**: LRP is reverse-mode AD
+The v4 engine implements LRP by **redefining Enzyme's VJPs**: LRP is reverse-mode AD
 in which each layer's true VJP is replaced by the rule's relevance map, with
 the relevance `Rᵏ` carried as the cotangent at `aᵏ`. (An earlier iteration of
 the port hand-rolled its own backward-pass engine — `get_activations`,
@@ -139,7 +139,7 @@ Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
   `input_vjp` once per seed, which with fast paths is FLOP-optimal
   (4 forwards + 4 transposes for αβ).
 - **Wrappers take explicit `ps`/`st` arguments, mirroring Lux.**
-  `RuledLayer <: AbstractLuxWrapperLayer{:layer}` is parameter- and
+  `LayerWithRule <: AbstractLuxWrapperLayer{:layer}` is parameter- and
   state-transparent, so the user's `ps`/`st` trees apply to the wrapped
   model unchanged; `ps`/`st` enter the custom rules as `Enzyme.Const`
   arguments. Benchmarked against a `StaticLayer`-style capturing wrapper:
@@ -170,13 +170,13 @@ of lazy `modify_params` and of the VJP strategy:
 | variant (rule body)               | Dense min | Conv min |
 |-----------------------------------|-----------|----------|
 | old engine (split thunks, precomputed modified layer) | 212 µs | 6.5 ms |
-| hijack, lazy ρps, nested combined AD | 319 µs | 9.6 ms |
-| hijack, lazy ρps, fast-path VJP   | 199 µs    | 5.9 ms   |
-| hijack, precomputed ρps, fast-path VJP | 173 µs | 6.0 ms |
+| new engine, lazy ρps, nested combined AD | 319 µs | 9.6 ms |
+| new engine, lazy ρps, fast-path VJP | 199 µs | 5.9 ms |
+| new engine, precomputed ρps, fast-path VJP | 173 µs | 6.0 ms |
 
 - The nested combined-AD fallback pays a redundant forward (the rule body
   already computed `z̃`) — 1.5–1.6× slower than split thunks. The
-  **fast-path VJPs are what make the hijack design a net win**; the AD
+  **fast-path VJPs are what make the new engine a net win**; the AD
   fallback only remains for layers without weights, where
   parameter-modifying rules don't apply.
 - Lazy `modify_params` costs ~27 µs / 1 MiB per call on the 512×512 Dense
@@ -211,7 +211,7 @@ of lazy `modify_params` and of the VJP strategy:
   `input_vjp` fast paths.
 - CRP kept the v3 algorithm unchanged: masking individual concepts at
   layer `l` needs explicit control over intermediate relevances, so CRP
-  does not reuse the hijacked reverse pass. Instead it runs its own
+  does not reuse the end-to-end reverse pass. Instead it runs its own
   `k`-indexed positional loops over the children of the analyzer's wrapped
   model — a forward pass collecting activations and pre-activations via
   `node_forward`, then per-concept backward passes through `propagate`
