@@ -50,6 +50,24 @@ and will be tested in follow-up work on real hardware.
   reproduces the fused layer output exactly — becomes a tested
   invariant instead of an implicit one
   (see "Forward-pass equivalence").
+- *2026-08-18 (task 1 LANDED):* the wrap-time activation split is
+  implemented (`SplitActivationNode` pair-wrapper; use-site machinery
+  deleted; `ZBoxRule` affine-only; CRP forward loop adapted;
+  `PassRule` extended to activation-only layers in checks, composite
+  matching, the presets and the no-rules constructor).
+  All three acceptance criteria hold, and more tightly than required:
+  the forward-equivalence testset (`test/test_forward.jl`) passes with
+  `==` on every layer/model shape *including gelu* (no `isapprox`
+  relaxation was needed); the CPU suite passes with **zero reference
+  regeneration** — even `ZBoxRule`'s references are unchanged, because
+  the relevance seeded from a ReLU output is zero exactly where the
+  affine-only and σ-inclusive variants differ (the divergence is still
+  real and documented for non-ReLU activations and nonzero relevance
+  at negative pre-activations); and the new un-canonized
+  `BatchNorm(…, relu)` end-to-end test matches a manual rule-body
+  backward pass with max deviation `0.0`.
+  Only the five composite-preset *show* references were regenerated
+  (the presets now list `LRPSupportedActivation => PassRule()`).
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -878,29 +896,14 @@ Ordered by how likely they are to matter:
 
 ## Task list
 
-1. Split activations out of rule-carrying nodes at wrap time
-   ("Decided" above). Preferred realization: the transparent
-   pair-wrapper — affine child carries the rule and the `ps`/`st`
-   routing, σ child is a `PassRule` node;
-   `ModelSurgeon.activation_fn`/`remove_activation` provide the
-   surgery; container-as-unit nodes are exempt.
-   Delete `ActivationSplitLayer`, the `node_forward` split,
-   `node_output` and `rule_layer` together with their rule-body call
-   sites; simplify `LayerNormRule`; adapt CRP's forward loop to the
-   two-stage node. `ZBoxRule` becomes affine-only:
-   regenerate its references and document the divergence from v3
-   in the changelog.
-   Acceptance, in order:
-   - the new forward-equivalence testset passes
-     ("Forward-pass equivalence" above): the wrapped model's forward
-     output `==` the original model's on CPU, for every test model;
-   - the CPU test suite is bit-identical except the documented ZBox
-     change, with the per-layer `propagate` testsets adapted to the
-     affine-layer contract (stripped in the harness, references kept),
-     not deleted;
-   - new end-to-end coverage for an un-canonized `BatchNorm(…, relu)`
-     model (its numerics are newly defined by the split; no prior
-     reference exists to preserve).
+1. ~~Split activations out of rule-carrying nodes at wrap time~~
+   **DONE (2026-08-18)** — see the status entry above. Realized as the
+   transparent pair-wrapper `SplitActivationNode`; use-site machinery
+   deleted; `ZBoxRule` affine-only (references turned out to be
+   unchanged, divergence documented in the changelog and docstring);
+   forward-equivalence testset in `test/test_forward.jl`;
+   un-canonized `BatchNorm(…, relu)` end-to-end coverage in
+   `test/test_lrp.jl`.
 2. Switch the five `make_zero` call sites to `Base.zero`
    (`src/lrp.jl:217`, `src/autodiff.jl:122,180,216,320`).
    On CPU this is behavior-neutral (`make_zero`'s fast `Array` method

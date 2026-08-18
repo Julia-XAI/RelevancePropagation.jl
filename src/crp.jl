@@ -44,12 +44,31 @@ end
 # a single end-to-end reverse pass would multiply the above-layer cost
 # by the number of features.
 
+# Forward pass through a single wrapped node, returning `(zᵏ, y)`:
+# `zᵏ` is the value `propagate` receives in the backward pass
+# (the affine child's output for a split node)
+# and `y` the node output fed to the next layer.
+function node_forward(wrapped::SplitActivationNode, x, ps, st)
+    z = first(apply(wrapped.affine, x, ps, st))
+    y = first(apply(wrapped.activation, z, NamedTuple(), NamedTuple()))
+    return z, y
+end
+function node_forward(wrapped, x, ps, st)
+    y = first(apply(wrapped, x, ps, st))
+    return y, y
+end
+
 # Propagate relevance through a single wrapped node.
 # Leaves are propagated directly through the pure rule body;
 # containers are differentiated as one unit through their wrapped form,
 # driving the same custom rules as the full reverse pass.
 function node_backward(wrapped::LayerWithRule, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     return propagate(wrapped.rule, wrapped.layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+end
+# The activation child of a split node carries `PassRule`, which passes
+# relevance through unchanged, so the backward pass reduces to the affine child.
+function node_backward(wrapped::SplitActivationNode, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    return node_backward(wrapped.affine, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 end
 node_backward(wrapped, aᵏ, zᵏ, ps, st, Rᵏ⁺¹) = seeded_pullback(wrapped, aᵏ, ps, st, Rᵏ⁺¹)
 
@@ -58,12 +77,11 @@ function call_analyzer(
 ) where {T,N}
     # Unpack internal LRP analyzer, matching layers positionally
     (; model, ps, st, normalize_output_relevance) = crp.lrp
-    layers = values(model.layers)
     wrapped = values(wrap_rules(model, crp.lrp.rules).layers)
     pss = values(ps)
     sts = values(st)
 
-    n_layers = length(layers)
+    n_layers = length(wrapped)
     n_features = number_of_features(crp.features)
     batchsize = size(input, N)
 
@@ -72,7 +90,7 @@ function call_analyzer(
     zs = Vector{Any}(undef, n_layers)
     as[1] = input
     for k in 1:n_layers
-        z, y = node_forward(layers[k], as[k], pss[k], sts[k])
+        z, y = node_forward(wrapped[k], as[k], pss[k], sts[k])
         zs[k] = z
         as[k + 1] = y
     end

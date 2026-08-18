@@ -29,22 +29,23 @@ and it is a pure function: `Rᵏ` is returned.
 # Arguments
 - `rule`: LRP rule to apply.
 - `layer`: The Lux layer relevance is propagated through.
+  The wrap-time activation split guarantees this layer carries no activation
+  function: activation-bearing leaves are split into an affine node and a
+  `PassRule` activation node when the model is wrapped.
 - `aᵏ`: Layer input activation.
-- `zᵏ`: Pre-activation of the layer, cached on the Enzyme tape by
-  [`node_forward`](@ref). For layers that are not split into affine part and
-  activation, `zᵏ` equals the layer output.
+- `zᵏ`: Layer output, cached on the Enzyme tape. For split layers this is the
+  pre-activation of the original fused layer.
 - `ps`, `st`: Unmodified layer parameters and states.
 - `Rᵏ⁺¹`: Relevance at the layer output.
 """
 function propagate(rule::AbstractLRPRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)
     ãᵏ = modify_input(rule, aᵏ)
     ρps = modify_params(rule, ps)
     # If neither input nor parameters are modified, the cached pre-activation
     # is the rule's z̃ and no additional forward pass is needed.
-    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(f, ãᵏ, ρps, st))
+    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(layer, ãᵏ, ρps, st))
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z̃)
-    c = input_vjp(f, ãᵏ, ρps, st, s)
+    c = input_vjp(layer, ãᵏ, ρps, st, s)
     return ãᵏ .* c
 end
 
@@ -345,6 +346,13 @@ R_j^k=\\sum_i \\frac{W_{ij}a_j^k - W_{ij}^{+}l_j - W_{ij}^{-}h_j}
     {\\sum_l W_{il}a_l^k+b_i - \\left(W_{il}^{+}l_l+b_i^{+}\\right) - \\left(W_{il}^{-}h_l+b_i^{-}\\right)} R_i^{k+1}
 ```
 
+All three terms propagate through the affine part of the layer,
+matching the formula above.
+This is an intentional divergence from v3,
+which routed the ``z``- and ``c``-terms
+through the layer's activation function
+(see the changelog for version 4.0).
+
 # References
 - $REF_MONTAVON_OVERVIEW
 """
@@ -354,20 +362,18 @@ struct ZBoxRule{T} <: AbstractLRPRule
 end
 
 function propagate(rule::ZBoxRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)
     l = zbox_input(aᵏ, rule.low)
     h = zbox_input(aᵏ, rule.high)
     ps⁺ = modify_params(Val(:keep_positive), ps)
     ps⁻ = modify_params(Val(:keep_negative), ps)
 
-    z = node_output(layer, zᵏ) # unmodified layer, including its activation
-    z⁺ = first(apply(f, l, ps⁺, st))
-    z⁻ = first(apply(f, h, ps⁻, st))
+    z⁺ = first(apply(layer, l, ps⁺, st))
+    z⁻ = first(apply(layer, h, ps⁻, st))
 
-    s = Rᵏ⁺¹ ./ modify_denominator(rule, z - z⁺ - z⁻)
-    c = input_vjp(layer, aᵏ, ps, st, s) # unmodified layer, including activation
-    c⁺ = input_vjp(f, l, ps⁺, st, s)
-    c⁻ = input_vjp(f, h, ps⁻, st, s)
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, zᵏ - z⁺ - z⁻)
+    c = input_vjp(layer, aᵏ, ps, st, s)
+    c⁺ = input_vjp(layer, l, ps⁺, st, s)
+    c⁻ = input_vjp(layer, h, ps⁻, st, s)
     return @. aᵏ * c - l * c⁺ - h * c⁻
 end
 
@@ -398,18 +404,17 @@ R_j^k = \\sum_i\\frac{\\left(W_{ij}a_j^k\\right)^+}{\\sum_l\\left(W_{il}a_l^k+b_
 struct ZPlusRule <: AbstractLRPRule end
 
 function propagate(rule::ZPlusRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
     ps⁺ = modify_params(Val(:keep_positive), ps)
     ps⁻ = modify_params(Val(:keep_negative), ps; keep_bias=false)
 
-    z⁺ = first(apply(f, aᵏ⁺, ps⁺, st))
-    z⁻ = first(apply(f, aᵏ⁻, ps⁻, st))
+    z⁺ = first(apply(layer, aᵏ⁺, ps⁺, st))
+    z⁻ = first(apply(layer, aᵏ⁻, ps⁻, st))
 
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z⁺ + z⁻)
-    c⁺ = input_vjp(f, aᵏ⁺, ps⁺, st, s)
-    c⁻ = input_vjp(f, aᵏ⁻, ps⁻, st, s)
+    c⁺ = input_vjp(layer, aᵏ⁺, ps⁺, st, s)
+    c⁻ = input_vjp(layer, aᵏ⁻, ps⁻, st, s)
     return @. aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
 end
 
@@ -449,7 +454,6 @@ struct AlphaBetaRule{T<:Real} <: AbstractLRPRule
 end
 
 function propagate(rule::AlphaBetaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
     # ᵅ/ᵝ: parameter variants of the positive and negative term. The α- and
@@ -460,17 +464,17 @@ function propagate(rule::AlphaBetaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     psᵝ⁻ = modify_params(Val(:keep_negative), ps)
     psᵝ⁺ = modify_params(Val(:keep_positive), ps; keep_bias=false)
 
-    zᵅ⁺ = first(apply(f, aᵏ⁺, psᵅ⁺, st))
-    zᵅ⁻ = first(apply(f, aᵏ⁻, psᵅ⁻, st))
-    zᵝ⁺ = first(apply(f, aᵏ⁻, psᵝ⁺, st))
-    zᵝ⁻ = first(apply(f, aᵏ⁺, psᵝ⁻, st))
+    zᵅ⁺ = first(apply(layer, aᵏ⁺, psᵅ⁺, st))
+    zᵅ⁻ = first(apply(layer, aᵏ⁻, psᵅ⁻, st))
+    zᵝ⁺ = first(apply(layer, aᵏ⁻, psᵝ⁺, st))
+    zᵝ⁻ = first(apply(layer, aᵏ⁺, psᵝ⁻, st))
 
     sᵅ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵅ⁺ + zᵅ⁻)
     sᵝ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵝ⁺ + zᵝ⁻)
-    cᵅ⁺ = input_vjp(f, aᵏ⁺, psᵅ⁺, st, sᵅ)
-    cᵅ⁻ = input_vjp(f, aᵏ⁻, psᵅ⁻, st, sᵅ)
-    cᵝ⁺ = input_vjp(f, aᵏ⁺, psᵅ⁺, st, sᵝ) # Wᵝ⁺ = Wᵅ⁺
-    cᵝ⁻ = input_vjp(f, aᵏ⁻, psᵅ⁻, st, sᵝ) # Wᵝ⁻ = Wᵅ⁻
+    cᵅ⁺ = input_vjp(layer, aᵏ⁺, psᵅ⁺, st, sᵅ)
+    cᵅ⁻ = input_vjp(layer, aᵏ⁻, psᵅ⁻, st, sᵅ)
+    cᵝ⁺ = input_vjp(layer, aᵏ⁺, psᵅ⁺, st, sᵝ) # Wᵝ⁺ = Wᵅ⁺
+    cᵝ⁻ = input_vjp(layer, aᵏ⁻, psᵅ⁻, st, sᵝ) # Wᵝ⁻ = Wᵅ⁻
 
     T = eltype(aᵏ)
     α = convert(T, rule.α)
@@ -508,7 +512,6 @@ struct GeneralizedGammaRule{T<:Real} <: AbstractLRPRule
 end
 
 function propagate(rule::GeneralizedGammaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)
     aᵏ⁺ = keep_positive(aᵏ)
     aᵏ⁻ = keep_negative(aᵏ)
     # ˡ/ʳ: LHS/RHS of the generalized Gamma-rule equation. The ˡ/ʳ-variants
@@ -520,19 +523,20 @@ function propagate(rule::GeneralizedGammaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ�
     psʳ⁻ = modify_params(rule⁻, ps)
     psʳ⁺ = modify_params(rule⁺, ps; keep_bias=false)
 
-    zˡ⁺ = first(apply(f, aᵏ⁺, psˡ⁺, st))
-    zˡ⁻ = first(apply(f, aᵏ⁻, psˡ⁻, st))
-    zʳ⁺ = first(apply(f, aᵏ⁻, psʳ⁺, st))
-    zʳ⁻ = first(apply(f, aᵏ⁺, psʳ⁻, st))
-    # Unmodified layer, including its (leakyrelu) activation:
-    z = node_output(layer, zᵏ)
+    zˡ⁺ = first(apply(layer, aᵏ⁺, psˡ⁺, st))
+    zˡ⁻ = first(apply(layer, aᵏ⁻, psˡ⁻, st))
+    zʳ⁺ = first(apply(layer, aᵏ⁻, psʳ⁺, st))
+    zʳ⁻ = first(apply(layer, aᵏ⁺, psʳ⁻, st))
 
-    sˡ = masked_copy(Rᵏ⁺¹, z .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
-    sʳ = masked_copy(Rᵏ⁺¹, z .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
-    cˡ⁺ = input_vjp(f, aᵏ⁺, psˡ⁺, st, sˡ)
-    cˡ⁻ = input_vjp(f, aᵏ⁻, psˡ⁻, st, sˡ)
-    cʳ⁺ = input_vjp(f, aᵏ⁺, psˡ⁺, st, sʳ) # Wʳ⁺ = Wˡ⁺
-    cʳ⁻ = input_vjp(f, aᵏ⁻, psˡ⁻, st, sʳ) # Wʳ⁻ = Wˡ⁻
+    # The indicator masks read the cached pre-activation. The rule targets
+    # `leakyrelu` layers, whose activation preserves sign, so the masks agree
+    # with v3's masks on the layer output.
+    sˡ = masked_copy(Rᵏ⁺¹, zᵏ .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
+    sʳ = masked_copy(Rᵏ⁺¹, zᵏ .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
+    cˡ⁺ = input_vjp(layer, aᵏ⁺, psˡ⁺, st, sˡ)
+    cˡ⁻ = input_vjp(layer, aᵏ⁻, psˡ⁻, st, sˡ)
+    cʳ⁺ = input_vjp(layer, aᵏ⁺, psˡ⁺, st, sʳ) # Wʳ⁺ = Wˡ⁺
+    cʳ⁻ = input_vjp(layer, aᵏ⁻, psˡ⁻, st, sʳ) # Wʳ⁻ = Wˡ⁻
     return @. aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
 end
 
@@ -579,11 +583,11 @@ function propagate(::LayerNormRule, layer::LayerNorm, aᵏ, zᵏ, ps, st, Rᵏ�
         σ² = var(aᵏ; dims=dims, mean=μₐ, corrected=false)
         aᵏₙ = @. z / sqrt(σ² + ϵ)
         # Propagate through the affine part with the ZeroRule as a fallback
-        # when the model is not canonized. The Scale layer carries the
-        # activation; `rule_layer` strips it inside `propagate`.
-        scale = Scale(layer.shape, layer.activation)
+        # when the model is not canonized. The wrap-time split guarantees the
+        # layer carries no activation, so the Scale layer is affine.
+        scale = Scale(layer.shape)
         ps_scale = (; weight=ps.scale, bias=ps.bias)
-        zₙ, _ = node_forward(scale, aᵏₙ, ps_scale, NamedTuple())
+        zₙ = first(apply(scale, aᵏₙ, ps_scale, NamedTuple()))
         propagate(ZeroRule(), scale, aᵏₙ, zₙ, ps_scale, NamedTuple(), Rᵏ⁺¹)
     else
         Rᵏ⁺¹

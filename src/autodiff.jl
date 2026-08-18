@@ -17,6 +17,12 @@
 # through `Chain`/`Parallel`/`SkipConnection`,
 # and shadow accumulation implements "sum branch relevances"
 # without any structural special cases.
+#
+# Activations are split out of rule-carrying leaves at wrap time
+# (`SplitActivationNode`): the affine part carries the rule,
+# and the activation follows as a separate `PassRule` node
+# whose reverse passes relevance through untouched.
+# Rules therefore only ever see affine (or activation-free) layers.
 
 #=====================#
 # Rule-carrying nodes #
@@ -63,50 +69,39 @@ function Base.show(io::IO, wrapper::LayerWithRule)
     return print(io, "LayerWithRule(", wrapper.rule, ", ", wrapper.layer, ")")
 end
 
-# Layers whose forward pass is `σ.(affine(x))`: their forward is split into
-# affine part and activation so the pre-activation `z` is cached on the tape.
-# Rules on these layers propagate relevance through the affine part only
-# (v3 semantics: `modify_layer` stripped activations of layers with weights),
-# so rules whose parameter modification is the identity can reuse the cached
-# `z` without any additional forward pass.
-const ActivationSplitLayer = Union{Dense,Scale,ConvLayer}
-
 """
-    node_forward(layer, x, ps, st)
+    SplitActivationNode(affine, activation)
 
-Compute the forward pass of a layer, returning `(z, y)` where `z` is the
-pre-activation and `y` the layer output. For layers that are not split into
-affine part and activation, `z == y`.
+Pair wrapper realizing the wrap-time activation split:
+the `affine` child is a [`LayerWithRule`](@ref)
+carrying the rule on the activation-stripped layer,
+the `activation` child a `PassRule`-carrying node
+applying the activation function.
+
+The activation stays in the compute graph —
+the forward pass is unchanged —
+but the reverse pass passes relevance through it untouched,
+as LRP prescribes for elementwise activations.
+The affine child's output is the pre-activation `zᵏ`,
+cached on the tape by its own custom rule.
+
+The wrapper routes `ps`/`st` to the affine child
+(`AbstractLuxWrapperLayer{:affine}`),
+so the `ps`/`st` trees of the unwrapped model apply unchanged;
+the activation child is parameter- and state-free.
 """
-function node_forward(layer, x, ps, st)
-    y = first(apply(layer, x, ps, st))
-    return y, y
+struct SplitActivationNode{A,N} <: AbstractLuxWrapperLayer{:affine}
+    affine::A
+    activation::N
 end
-function node_forward(layer::ActivationSplitLayer, x, ps, st)
-    z = first(apply(remove_activation(layer), x, ps, st))
-    return z, node_output(layer, z)
+function LuxCore.apply(node::SplitActivationNode, x, ps, st)
+    z = first(apply(node.affine, x, ps, st))
+    y = first(apply(node.activation, z, NamedTuple(), NamedTuple()))
+    return y, NamedTuple()
 end
-
-"""
-    node_output(layer, z)
-
-Recover the layer output `y` from the cached pre-activation `z`
-by applying the layer's activation function.
-"""
-node_output(layer, z) = z
-function node_output(layer::ActivationSplitLayer, z)
-    σ = layer.activation
-    return σ === identity ? z : σ.(z)
+function Base.show(io::IO, node::SplitActivationNode)
+    return print(io, "SplitActivationNode(", node.affine, ", ", node.activation, ")")
 end
-
-"""
-    rule_layer(layer)
-
-The layer a rule propagates relevance through: layers with weights have their
-activation function stripped, all other layers are returned unchanged.
-"""
-rule_layer(layer) = layer
-rule_layer(layer::ActivationSplitLayer) = remove_activation(layer)
 
 function EnzymeRules.augmented_primal(
     config::RevConfig,
@@ -118,13 +113,15 @@ function EnzymeRules.augmented_primal(
     ps::Const,
     st::Const,
 )
-    z, y = node_forward(layer.val, x.val, ps.val, st.val)
-    dy = needs_shadow(config) ? make_zero(y) : nothing
+    # After the wrap-time activation split, the node's layer never carries an
+    # activation function, so its output is the cached pre-activation `zᵏ`.
+    z = first(apply(layer.val, x.val, ps.val, st.val))
+    dy = needs_shadow(config) ? make_zero(z) : nothing
     # `x` is only copied if Enzyme reports it may be overwritten before the
     # reverse pass; the function itself is index 1 of `overwritten`.
     xᵏ = overwritten(config)[4] ? copy(x.val) : x.val
     tape = (; x=xᵏ, z, dy)
-    return AugmentedReturn(needs_primal(config) ? y : nothing, dy, tape)
+    return AugmentedReturn(needs_primal(config) ? z : nothing, dy, tape)
 end
 
 function EnzymeRules.reverse(

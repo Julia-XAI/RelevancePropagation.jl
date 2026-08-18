@@ -13,6 +13,10 @@ Composite(
     ReshapeLayer             => PassRule(),
     NoOpLayer                => PassRule(),
     typeof(identity)         => PassRule(),
+    typeof(NNlib.gelu_tanh)  => PassRule(),
+    typeof(mish)             => PassRule(),
+    typeof(relu)             => PassRule(),
+    typeof(swish)            => PassRule(),
   ),
   FirstLayerTypeMap(  # first layer
     Conv          => ZBoxRule{Float32}(-3.0f0, 3.0f0),

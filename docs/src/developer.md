@@ -147,25 +147,34 @@ and each branch connection in a `ConnectionWithRule`.
 The wrappers are parameter- and state-transparent,
 so the model's original `ps` and `st` trees apply to the wrapped model unchanged.
 
+Layers that carry an activation function are split at wrap time
+into a `SplitActivationNode`:
+the activation-stripped, affine part carries the rule,
+and the activation follows as a separate node carrying the [`PassRule`](@ref).
+The activation stays in the compute graph —
+the forward pass is unchanged —
+but the reverse pass passes relevance through it untouched,
+as LRP prescribes for elementwise activations.
+"LRP ignores activations" is thereby a structural property of the wrapped model,
+and rules only ever propagate through affine (or activation-free) layers.
+Sub-models treated as one differentiation unit are exempt from the split.
+
 ```@docs
 RelevancePropagation.LayerWithRule
+RelevancePropagation.SplitActivationNode
 RelevancePropagation.lrp_node
 RelevancePropagation.ConnectionWithRule
 ```
 
 Applying a `LayerWithRule` routes the layer call through the function `lrp_node`,
 whose Enzyme custom rule does two things:
-- The *augmented forward pass* ([`node_forward`](@ref RelevancePropagation.node_forward))
-  splits the layer into its affine part and its activation function
-  and caches the input $a^k$ and the pre-activation $z^k$ on Enzyme's tape.
+- The *augmented forward pass* applies the (affine) layer
+  and caches the input $a^k$ and its output —
+  the pre-activation $z^k$ — on Enzyme's tape.
 - The *reverse pass* receives the accumulated output relevance $R^{k+1}$
   in the return shadow and calls the rule's
   [`propagate`](@ref RelevancePropagation.propagate) function,
   accumulating the resulting $R^k$ into the input shadow.
-
-```@docs
-RelevancePropagation.node_forward
-```
 
 Caching the pre-activation $z^k$ is a key optimization:
 for rules that neither modify the input nor the parameters
@@ -181,12 +190,11 @@ should be straightforward to understand:
 
 ```julia
 function propagate(rule::AbstractLRPRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
-    f = rule_layer(layer)                 # activation-stripped layer
     ãᵏ = modify_input(rule, aᵏ)
     ρps = modify_params(rule, ps)         # lazily ρ-modified parameters
-    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(f, ãᵏ, ρps, st))
+    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(layer, ãᵏ, ρps, st))
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z̃)
-    c = input_vjp(f, ãᵏ, ρps, st, s)
+    c = input_vjp(layer, ãᵏ, ρps, st, s)
     return ãᵏ .* c
 end
 ```

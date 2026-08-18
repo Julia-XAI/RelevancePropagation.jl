@@ -1,9 +1,12 @@
 using RelevancePropagation
 using Test
 
-using RelevancePropagation: propagate, node_forward
+using RelevancePropagation: propagate, remove_activation
 using Lux
+using LuxCore: LuxCore
 using StableRNGs: StableRNG
+
+forward(layer, ps, st, x) = first(LuxCore.apply(layer, x, ps, st))
 
 model = Chain(Dense(10 => 8, relu), Dense(8 => 4, relu), Dense(4 => 3))
 ps, st = Lux.setup(StableRNG(123), model)
@@ -62,18 +65,23 @@ end
     @test first(lwr) == expl.val
     @test size(lwr[2]) == (8, 1)
 
-    # The analyzer applies the same rules as a manual backward pass
+    # The analyzer applies the same rules as a manual backward pass.
+    # Mirroring the wrap-time activation split, the forward collects the
+    # affine pre-activations and the backward propagates through the
+    # activation-stripped layers.
     layers = values(model.layers)
+    affine = map(remove_activation, layers)
     as = Vector{Any}(undef, 4) # layer inputs, as[4] = model output
     zs = Vector{Any}(undef, 3) # cached pre-activations
     as[1] = input
     for k in 1:3
-        zs[k], as[k + 1] = node_forward(layers[k], as[k], ps[k], st[k])
+        zs[k] = forward(affine[k], ps[k], st[k], as[k])
+        as[k + 1] = forward(layers[k], ps[k], st[k], as[k])
     end
     R = zero(as[4])
     R[argmax(as[4])] = 1
     for k in 3:-1:1
-        R = propagate(ZeroRule(), layers[k], as[k], zs[k], ps[k], st[k], R)
+        R = propagate(ZeroRule(), affine[k], as[k], zs[k], ps[k], st[k], R)
     end
     expl = analyze(input, analyzer)
     @test expl.val ≈ R
@@ -160,6 +168,37 @@ end
     e_sc = analyze(batch, analyzer_sc)
     @test size(e_sc.val) == size(batch)
     @test !any(isnan, e_sc.val)
+end
+
+@testset "Un-canonized BatchNorm" begin
+    # The wrap-time activation split newly defines LRP on fused
+    # `BatchNorm(..., σ)` layers: an affine testmode-BatchNorm node carries
+    # the rule, followed by a PassRule activation node. No v3 reference
+    # exists, so the engine is cross-checked against a manual backward pass
+    # through the pure rule bodies.
+    model_bn = Chain(Dense(10 => 8, relu), BatchNorm(8, relu), Dense(8 => 3))
+    ps_bn, st_bn = Lux.setup(StableRNG(123), model_bn)
+    analyzer = LRP(model_bn, ps_bn, st_bn)
+    expl = analyze(input, analyzer)
+    @test size(expl.val) == size(input)
+    @test all(isfinite, expl.val)
+
+    st_test = Lux.testmode(st_bn)
+    layers = values(model_bn.layers)
+    affine = map(remove_activation, layers)
+    as = Vector{Any}(undef, 4)
+    zs = Vector{Any}(undef, 3)
+    as[1] = input
+    for k in 1:3
+        zs[k] = forward(affine[k], ps_bn[k], st_test[k], as[k])
+        as[k + 1] = forward(layers[k], ps_bn[k], st_test[k], as[k])
+    end
+    R = zero(as[4])
+    R[argmax(as[4])] = 1
+    for k in 3:-1:1
+        R = propagate(ZeroRule(), affine[k], as[k], zs[k], ps_bn[k], st_test[k], R)
+    end
+    @test expl.val ≈ R
 end
 
 @testset "Output relevance normalization" begin

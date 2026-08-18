@@ -34,7 +34,8 @@ end
 
 # Wrap the model in rule-carrying nodes
 # by zipping rules and layers along the model structure:
-# leaves become `LayerWithRule`s,
+# leaves become `LayerWithRule`s
+# (activation-bearing leaves split into `SplitActivationNode`s),
 # branch connections become `ConnectionWithRule`s.
 # Assumes `check_rule_compat` has validated the structure.
 function wrap_children(layers::NamedTuple, rules::NamedTuple)
@@ -50,10 +51,23 @@ end
 function wrap_rules(sc::SkipConnection, rule::AbstractLRPRule)
     return invoke(wrap_rules, Tuple{SkipConnection,Any}, sc, rule)
 end
+# The wrap-time activation split: a leaf with an activation function is split
+# into an affine node carrying the rule and a `PassRule` activation node,
+# so rules only ever propagate through affine layers.
+function wrap_rules(layer, rule::AbstractLRPRule)
+    σ = activation_fn(layer)
+    (isnothing(σ) || σ === identity) && return LayerWithRule(rule, layer)
+    return SplitActivationNode(
+        LayerWithRule(rule, remove_activation(layer)), activation_node(σ)
+    )
+end
+# The activation child of a split node matches the `WrappedFunction` layers
+# `ModelSurgeon.split_activation` creates, so pre-split models with `PassRule`
+# on their activation layers agree with the fused form.
+activation_node(σ) = LayerWithRule(PassRule(), WrappedFunction(Base.Fix1(broadcast, σ)))
 # A single rule assigned to a container treats the sub-model as one
-# differentiation unit; `Chain`/`Parallel` methods disambiguate against the
-# container methods above.
-wrap_rules(layer, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
+# differentiation unit and is exempt from the activation split;
+# `Chain`/`Parallel` methods disambiguate against the container methods above.
 wrap_rules(layer::Chain, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
 wrap_rules(layer::Parallel, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
 
@@ -76,7 +90,8 @@ Rules are assigned to layers by passing either
 - a `NamedTuple` of LRP rules mirroring the keys of `model.layers`,
 - an `AbstractVector` of LRP rules for flat models, matched positionally, or
 - a [`Composite`](@ref), which assigns rules based on layer type and position.
-If no rules are passed, [`ZeroRule`](@ref) is used on all layers.
+If no rules are passed, [`ZeroRule`](@ref) is used on all layers,
+except for activation-only layers, which get the [`PassRule`](@ref).
 
 Nested `Chain` and `Parallel` layers take a nested `NamedTuple` of rules
 mirroring their children; a single rule assigned to such a sub-model instead
@@ -146,9 +161,13 @@ function LRP(model::Chain, ps, st, c::Composite; kwargs...)
     return LRP(model, ps, st, lrp_rules(model, c); kwargs...)
 end
 
-# Convenience constructor without rules: use ZeroRule everywhere
+# Convenience constructor without rules: ZeroRule everywhere, except
+# activation-only layers, which get the same PassRule the wrap-time split
+# assigns to split-out activations — a default-constructed pre-split model
+# thereby agrees with its fused form.
+default_lrp_rule(layer) = is_activation_layer(layer) ? PassRule() : ZeroRule()
 function LRP(model::Chain, ps, st; kwargs...)
-    return LRP(model, ps, st, map_layers(Returns(ZeroRule()), model); kwargs...)
+    return LRP(model, ps, st, map_layers(default_lrp_rule, model); kwargs...)
 end
 
 #==========================#

@@ -2,7 +2,7 @@ using BenchmarkTools
 using Lux
 using StableRNGs: StableRNG
 using RelevancePropagation
-using RelevancePropagation: propagate, node_forward, modify_params
+using RelevancePropagation: propagate, modify_params, remove_activation
 
 T = Float32
 input_size = (32, 32, 3, 1)
@@ -80,12 +80,16 @@ for rname in rulenames
 end
 
 for (lname, (layer, ps, st, aᵏ)) in layers
-    # Seed the relevance with the layer output, like the rule tests do
-    zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
+    # Under the wrap-time activation split, rules propagate through the
+    # activation-stripped layer; the relevance is seeded with the fused
+    # layer output, like the rule tests do.
+    affine = remove_activation(layer)
+    zᵏ = first(Lux.apply(affine, aᵏ, ps, st))
+    Rᵏ⁺¹ = first(Lux.apply(layer, aᵏ, ps, st))
     for (rname, rule) in rules
         suite["modify params"][rname][lname] = @benchmarkable modify_params($(rule), $(ps))
         suite["propagate"][rname][lname] = @benchmarkable propagate(
-            $(rule), $(layer), $(aᵏ), $(zᵏ), $(ps), $(st), $(Rᵏ⁺¹)
+            $(rule), $(affine), $(aᵏ), $(zᵏ), $(ps), $(st), $(Rᵏ⁺¹)
         )
     end
 end

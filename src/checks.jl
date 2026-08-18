@@ -41,7 +41,9 @@ lrp_check_layer(l) = lrp_check_layer_type(l) && lrp_check_activation(l)
 lrp_check_layer_type(l) = LRP_CONFIG.supports_layer(l)
 # Lux wraps bare functions used as layers in `WrappedFunction`;
 # users register the wrapped function itself via `LRP_CONFIG.supports_layer`.
-lrp_check_layer_type(l::WrappedFunction) = LRP_CONFIG.supports_layer(l.func)
+# Split-out activations are broadcasts of the activation function,
+# which `wrapped_function` sees through.
+lrp_check_layer_type(l::WrappedFunction) = LRP_CONFIG.supports_layer(wrapped_function(l))
 
 function lrp_check_activation(layer)
     f = activation_fn(layer)

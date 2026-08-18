@@ -10,15 +10,15 @@ $(repr("text/plain", EpsilonGammaBox(-3.0f0, 3.0f0)))
 function EpsilonGammaBox(low, high; epsilon=1.0f-6, gamma=0.25f0)
     return Composite(
         GlobalTypeMap(
-            ConvLayer          => GammaRule(gamma),
-            Dense              => EpsilonRule(epsilon),
-            Scale              => EpsilonRule(epsilon),
-            LayerNorm          => LayerNormRule(),
-            DropoutLayer       => PassRule(),
-            NormalizationLayer => PassRule(),
-            ReshapingLayer     => PassRule(),
-            NoOpLayer          => PassRule(),
-            typeof(identity)   => PassRule(),
+            ConvLayer              => GammaRule(gamma),
+            Dense                  => EpsilonRule(epsilon),
+            Scale                  => EpsilonRule(epsilon),
+            LayerNorm              => LayerNormRule(),
+            DropoutLayer           => PassRule(),
+            NormalizationLayer     => PassRule(),
+            ReshapingLayer         => PassRule(),
+            NoOpLayer              => PassRule(),
+            LRPSupportedActivation => PassRule(),
         ),
         FirstLayerTypeMap(ConvLayer => ZBoxRule(low, high)),
     )
@@ -36,15 +36,15 @@ $(repr("text/plain", EpsilonPlus()))
 function EpsilonPlus(; epsilon=1.0f-6)
     return Composite(
         GlobalTypeMap(
-            ConvLayer          => ZPlusRule(),
-            Dense              => EpsilonRule(epsilon),
-            Scale              => EpsilonRule(epsilon),
-            LayerNorm          => LayerNormRule(),
-            DropoutLayer       => PassRule(),
-            NormalizationLayer => PassRule(),
-            ReshapingLayer     => PassRule(),
-            NoOpLayer          => PassRule(),
-            typeof(identity)   => PassRule(),
+            ConvLayer              => ZPlusRule(),
+            Dense                  => EpsilonRule(epsilon),
+            Scale                  => EpsilonRule(epsilon),
+            LayerNorm              => LayerNormRule(),
+            DropoutLayer           => PassRule(),
+            NormalizationLayer     => PassRule(),
+            ReshapingLayer         => PassRule(),
+            NoOpLayer              => PassRule(),
+            LRPSupportedActivation => PassRule(),
         ),
     )
 end
@@ -61,15 +61,15 @@ $(repr("text/plain", EpsilonAlpha2Beta1()))
 function EpsilonAlpha2Beta1(; epsilon=1.0f-6)
     return Composite(
         GlobalTypeMap(
-            ConvLayer          => AlphaBetaRule(2.0f0, 1.0f0),
-            Dense              => EpsilonRule(epsilon),
-            Scale              => EpsilonRule(epsilon),
-            LayerNorm          => LayerNormRule(),
-            DropoutLayer       => PassRule(),
-            NormalizationLayer => PassRule(),
-            ReshapingLayer     => PassRule(),
-            NoOpLayer          => PassRule(),
-            typeof(identity)   => PassRule(),
+            ConvLayer              => AlphaBetaRule(2.0f0, 1.0f0),
+            Dense                  => EpsilonRule(epsilon),
+            Scale                  => EpsilonRule(epsilon),
+            LayerNorm              => LayerNormRule(),
+            DropoutLayer           => PassRule(),
+            NormalizationLayer     => PassRule(),
+            ReshapingLayer         => PassRule(),
+            NoOpLayer              => PassRule(),
+            LRPSupportedActivation => PassRule(),
         ),
     )
 end
@@ -86,15 +86,15 @@ $(repr("text/plain", EpsilonPlusFlat()))
 function EpsilonPlusFlat(; epsilon=1.0f-6)
     return Composite(
         GlobalTypeMap(
-            ConvLayer          => ZPlusRule(),
-            Dense              => EpsilonRule(epsilon),
-            Scale              => EpsilonRule(epsilon),
-            LayerNorm          => LayerNormRule(),
-            DropoutLayer       => PassRule(),
-            NormalizationLayer => PassRule(),
-            ReshapingLayer     => PassRule(),
-            NoOpLayer          => PassRule(),
-            typeof(identity)   => PassRule(),
+            ConvLayer              => ZPlusRule(),
+            Dense                  => EpsilonRule(epsilon),
+            Scale                  => EpsilonRule(epsilon),
+            LayerNorm              => LayerNormRule(),
+            DropoutLayer           => PassRule(),
+            NormalizationLayer     => PassRule(),
+            ReshapingLayer         => PassRule(),
+            NoOpLayer              => PassRule(),
+            LRPSupportedActivation => PassRule(),
         ),
         FirstLayerTypeMap(ConvLayer => FlatRule()),
     )
@@ -112,15 +112,15 @@ $(repr("text/plain", EpsilonAlpha2Beta1Flat()))
 function EpsilonAlpha2Beta1Flat(; epsilon=1.0f-6)
     return Composite(
         GlobalTypeMap(
-            ConvLayer          => AlphaBetaRule(2.0f0, 1.0f0),
-            Dense              => EpsilonRule(epsilon),
-            Scale              => EpsilonRule(epsilon),
-            LayerNorm          => LayerNormRule(),
-            DropoutLayer       => PassRule(),
-            NormalizationLayer => PassRule(),
-            ReshapingLayer     => PassRule(),
-            NoOpLayer          => PassRule(),
-            typeof(identity)   => PassRule(),
+            ConvLayer              => AlphaBetaRule(2.0f0, 1.0f0),
+            Dense                  => EpsilonRule(epsilon),
+            Scale                  => EpsilonRule(epsilon),
+            LayerNorm              => LayerNormRule(),
+            DropoutLayer           => PassRule(),
+            NormalizationLayer     => PassRule(),
+            ReshapingLayer         => PassRule(),
+            NoOpLayer              => PassRule(),
+            LRPSupportedActivation => PassRule(),
         ),
         FirstLayerTypeMap(ConvLayer => FlatRule()),
     )

@@ -2,11 +2,12 @@ using RelevancePropagation
 using Test
 using ReferenceTests
 
-using RelevancePropagation: propagate, node_forward, rule_layer, modify_params
+using RelevancePropagation: propagate, modify_params
 using RelevancePropagation: modify_input, modify_denominator
 using RelevancePropagation: is_compatible, modify_weight, modify_bias
 using RelevancePropagation: modify_parameters, NegativeGammaRule
-using RelevancePropagation: activation_fn
+using RelevancePropagation: activation_fn, remove_activation
+using RelevancePropagation: wrap_rules, LayerWithRule, SplitActivationNode
 using RelevancePropagation: stabilize_denom
 using Lux
 using LuxCore: LuxCore
@@ -48,11 +49,15 @@ const RULES = Dict(
     layer = Dense(2 => 2, relu)
     ps = (; weight=W, bias=b)
     st = NamedTuple()
-    @test activation_fn(rule_layer(layer)) == identity
+    # The wrap-time split assigns the rule to the activation-stripped layer
+    node = wrap_rules(layer, rule)
+    @test node isa SplitActivationNode
+    affine = node.affine.layer
+    @test activation_fn(affine) == identity
     @test modify_params(rule, ps) === ps # ZeroRule doesn't modify parameters
 
-    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
-    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    zᵏ = forward(affine, ps, st, aᵏ)
+    R̂ᵏ = @inferred propagate(rule, affine, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     ## Pooling layer
@@ -67,9 +72,10 @@ const RULES = Dict(
 
     layer = MaxPool((2, 2); stride=(1, 1))
     ps, st = setup_testmode(layer)
-    @test rule_layer(layer) === layer # layers without weights are not modified
+    # Activation-free layers are wrapped without a split
+    @test wrap_rules(layer, rule) isa LayerWithRule
 
-    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
+    zᵏ = forward(layer, ps, st, aᵏ)
     R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
@@ -84,8 +90,9 @@ const RULES = Dict(
     ps = (; weight=w, bias=b)
     st = NamedTuple()
 
-    zᵏ, _ = node_forward(layer, aᵏ, ps, st)
-    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    affine = remove_activation(layer)
+    zᵏ = forward(affine, ps, st, aᵏ)
+    R̂ᵏ = @inferred propagate(rule, affine, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -99,8 +106,13 @@ end
     for rule in (ZeroRule(), EpsilonRule())
         @test modify_params(rule, ps) === ps
     end
-    # Rules propagate through the activation-stripped layer
-    @test activation_fn(rule_layer(Dense(2 => 2, relu))) == identity
+    # Rules propagate through the activation-stripped layer: the wrap-time
+    # split assigns the rule to the affine child and routes the activation
+    # through a PassRule node.
+    node = wrap_rules(Dense(2 => 2, relu), ZeroRule())
+    @test node isa SplitActivationNode
+    @test activation_fn(node.affine.layer) == identity
+    @test node.activation.rule == PassRule()
 
     # keep_bias=false zeroes the bias
     ρps = modify_params(ZeroRule(), ps; keep_bias=false)
@@ -184,7 +196,8 @@ end
     layer = Dense(2 => 1)
     ps = (; weight=W, bias=b)
     st = NamedTuple()
-    zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
+    zᵏ = forward(layer, ps, st, aᵏ)
+    Rᵏ⁺¹ = zᵏ
 
     # Expected outputs
     Rᵏ_α1β0 = [-1.0f0, 0.0f0]
@@ -212,8 +225,9 @@ end
     Rᵏ⁺¹ = [-0.07; 1.0]
     Rᵏ⁺¹⁺ = [0.0; 1.0]
     Rᵏ⁺¹⁻ = [-0.07; 0.0]
-    zᵏ, y = node_forward(layer, a, ps, st)
-    @test Rᵏ⁺¹ ≈ y
+    affine = remove_activation(layer)
+    zᵏ = forward(affine, ps, st, a)
+    @test Rᵏ⁺¹ ≈ forward(layer, ps, st, a)
 
     W⁺ = [1.25 -4.0; 2.5 0.0] # W + γW⁺
     b⁺ = [-2.0, 3.75]         # b + γb⁺
@@ -240,7 +254,7 @@ end
     @test iszero(psˡ⁻.bias)
     @test iszero(psʳ⁺.bias)
 
-    R̂ᵏ = @inferred propagate(rule, layer, a, zᵏ, ps, st, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(rule, affine, a, zᵏ, ps, st, Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -272,20 +286,24 @@ end
     ###################
     layer = LayerNorm((2, 2), relu; epsilon=0.0f0)
 
-    # not canonized. The LayerNormRule computes its own statistics, so the
-    # cached pre-activation `zᵏ` is unused and `nothing` is passed instead:
-    # these v3-replicating affine parameters aren't valid for the Lux forward.
-    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, nothing, ps_affine, NamedTuple(), Rᵏ⁺¹)
+    # not canonized. Under the wrap-time split, `propagate` sees the
+    # activation-stripped layer. The LayerNormRule computes its own
+    # statistics, so the cached pre-activation `zᵏ` is unused and `nothing`
+    # is passed instead: these v3-replicating affine parameters aren't valid
+    # for the Lux forward.
+    affine = remove_activation(layer)
+    R̂ᵏ = @inferred propagate(rule, affine, aᵏ, nothing, ps_affine, NamedTuple(), Rᵏ⁺¹)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: LayerNorm splits into normalization and affine Scale part
     model = Chain(LayerNorm((2, 2), relu; epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=ps_affine), (; layer_1=NamedTuple()))
-    z₁, aₙ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1) # normalization-only part
-    z₂, _ = node_forward(model[2], aₙ, ps.layer_2, st.layer_2)
+    aₙ = forward(model[1], ps.layer_1, st.layer_1, aᵏ) # normalization-only part
+    affine₂ = remove_activation(model[2]) # Scale layer carrying the relu
+    z₂ = forward(affine₂, ps.layer_2, st.layer_2, aₙ)
 
-    R = @inferred propagate(ZeroRule(), model[2], aₙ, z₂, ps.layer_2, st.layer_2, Rᵏ⁺¹)
-    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, R)
+    R = @inferred propagate(ZeroRule(), affine₂, aₙ, z₂, ps.layer_2, st.layer_2, Rᵏ⁺¹)
+    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, aₙ, ps.layer_1, st.layer_1, R)
     @test R̂ᵏ ≈ Rᵏ
 
     ############################
@@ -294,7 +312,7 @@ end
     layer = LayerNorm((2, 2); affine=false, epsilon=0.0f0)
 
     # not canonized
-    zᵏ, _ = node_forward(layer, aᵏ, NamedTuple(), NamedTuple())
+    zᵏ = forward(layer, NamedTuple(), NamedTuple(), aᵏ)
     R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, NamedTuple(), NamedTuple(), R)
     @test R̂ᵏ ≈ Rᵏ
 
@@ -302,7 +320,7 @@ end
     model = Chain(LayerNorm((2, 2); affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
     @test length(model.layers) == 1
-    z₁, _ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1)
+    z₁ = forward(model[1], ps.layer_1, st.layer_1, aᵏ)
 
     R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, R)
     @test R̂ᵏ ≈ Rᵏ
@@ -313,18 +331,20 @@ end
     layer = LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0)
 
     # not canonized
-    zᵏ, _ = node_forward(layer, aᵏ, NamedTuple(), NamedTuple())
-    R̂ᵏ = @inferred propagate(rule, layer, aᵏ, zᵏ, NamedTuple(), NamedTuple(), R)
+    affine = remove_activation(layer)
+    zᵏ = forward(affine, NamedTuple(), NamedTuple(), aᵏ)
+    R̂ᵏ = @inferred propagate(rule, affine, aᵏ, zᵏ, NamedTuple(), NamedTuple(), R)
     @test R̂ᵏ ≈ Rᵏ
 
     # canonized: splits into normalization and a bias-free Scale carrying relu
     model = Chain(LayerNorm((2, 2), relu; affine=false, epsilon=0.0f0))
     model, ps, st = canonize(model, (; layer_1=NamedTuple()), (; layer_1=NamedTuple()))
-    z₁, aₙ = node_forward(model[1], aᵏ, ps.layer_1, st.layer_1)
-    z₂, _ = node_forward(model[2], aₙ, ps.layer_2, st.layer_2)
+    aₙ = forward(model[1], ps.layer_1, st.layer_1, aᵏ)
+    affine₂ = remove_activation(model[2])
+    z₂ = forward(affine₂, ps.layer_2, st.layer_2, aₙ)
 
-    Rₙ = @inferred propagate(ZeroRule(), model[2], aₙ, z₂, ps.layer_2, st.layer_2, R)
-    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, z₁, ps.layer_1, st.layer_1, Rₙ)
+    Rₙ = @inferred propagate(ZeroRule(), affine₂, aₙ, z₂, ps.layer_2, st.layer_2, R)
+    R̂ᵏ = @inferred propagate(rule, model[1], aᵏ, aₙ, ps.layer_1, st.layer_1, Rₙ)
     @test R̂ᵏ ≈ Rᵏ
 end
 
@@ -375,10 +395,17 @@ end
 ## Reference tests over all (rule, layer) combinations.
 # The JLD2 reference values from v3 stay valid: all test weights are explicit
 # StableRNG(123) draws that are injected into the Lux `ps` NamedTuples.
+# Under the wrap-time activation split, `propagate` only ever sees affine
+# layers, so the harness strips the activation before calling; the relevance
+# is still seeded with the fused layer output. This preserves all reference
+# values except `ZBoxRule`'s on activation-bearing layers, whose affine-only
+# semantics are an intentional, documented divergence from v3.
 function run_rule_tests(rule, layer, ps, st, rulename, layername, aᵏ)
     if is_compatible(rule, layer, ps)
-        zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
-        Rᵏ = propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+        affine = remove_activation(layer)
+        zᵏ = forward(affine, ps, st, aᵏ)
+        Rᵏ⁺¹ = forward(layer, ps, st, aᵏ)
+        Rᵏ = propagate(rule, affine, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
         @test typeof(Rᵏ) == typeof(aᵏ)
         @test size(Rᵏ) == size(aᵏ)
         @test_reference "references/rules/$rulename/$layername.jld2" Dict("R" => Rᵏ) by =
@@ -469,7 +496,8 @@ end
 
 # Test equivalence of ZPlusRule() and AlphaBetaRule(1.0f0, 0.0f0)
 layer, ps, st = layers["Conv"]
-zᵏ, Rᵏ⁺¹ = node_forward(layer, aᵏ, ps, st)
+zᵏ = forward(layer, ps, st, aᵏ) # identity activation: output == pre-activation
+Rᵏ⁺¹ = zᵏ
 Rᵏ_z⁺ = propagate(ZPlusRule(), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 Rᵏ_αβ = propagate(AlphaBetaRule(1.0f0, 0.0f0), layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 @test Rᵏ_z⁺ ≈ Rᵏ_αβ

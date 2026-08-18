@@ -32,6 +32,10 @@ using Test
         @info "Testing Enzyme pullbacks against Zygote..."
         include("test_autodiff.jl")
     end
+    @testset "Forward-pass equivalence" begin
+        @info "Testing forward-pass equivalence of wrapped models..."
+        include("test_forward.jl")
+    end
     @testset "Model checks" begin
         @info "Testing model checks..."
         include("test_checks.jl")

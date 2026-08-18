@@ -117,11 +117,21 @@ Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
   the explanation. The mask (output relevance seed) is built by an
   `EnzymeRules.inactive` function, detaching it from differentiation.
 - **Each rule is an `EnzymeRules` custom rule** on `lrp_node`: the
-  augmented forward splits weight layers into affine part + activation and
-  caches the pre-activation `z` on the tape; the reverse calls the pure
-  rule body `propagate` and accumulates into the input shadow. Rules whose
-  parameter modification is the identity (Zero/Epsilon, the dominant case)
-  reuse the cached `z` — no modified forward pass at all.
+  augmented forward applies the layer and caches the pre-activation `z` on
+  the tape; the reverse calls the pure rule body `propagate` and
+  accumulates into the input shadow. Rules whose parameter modification is
+  the identity (Zero/Epsilon, the dominant case) reuse the cached `z` — no
+  modified forward pass at all.
+- **Activations are split out at wrap time** (`SplitActivationNode`,
+  2026-08-18, task 1 of `PLAN_GPU.md`): the affine child carries the rule,
+  the activation child carries `PassRule`, and rules therefore only ever
+  see affine layers. This replaced the earlier use-site machinery
+  (`ActivationSplitLayer`, `node_forward`/`node_output`/`rule_layer`) and
+  made `ZBoxRule` affine-only — an intentional, documented divergence from
+  v3 that leaves all existing references unchanged (for ReLU networks the
+  incoming relevance is zero exactly where the two variants differ).
+  The forward split is bit-exact against LuxLib's fused kernels on CPU,
+  asserted by `test/test_forward.jl` (`==`, including gelu).
 - **Branch routing needs no structural code**: Lux's `apply` plumbing is
   differentiated as-is; shadow accumulation (`.+=`) implements "sum branch
   relevances", and a tiny vararg custom rule on the wrapped `connection` of
@@ -214,7 +224,8 @@ of lazy `modify_params` and of the VJP strategy:
   does not reuse the end-to-end reverse pass. Instead it runs its own
   `k`-indexed positional loops over the children of the analyzer's wrapped
   model — a forward pass collecting activations and pre-activations via
-  `node_forward`, then per-concept backward passes through `propagate`
+  `node_forward` (which mirrors the two-stage `SplitActivationNode`s),
+  then per-concept backward passes through `propagate`
   (containers fall back to `seeded_pullback`). The flat-model assumption
   (positional `layer::Int`) is now documented in the docstring.
 

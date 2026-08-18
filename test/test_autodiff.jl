@@ -1,5 +1,4 @@
-using RelevancePropagation:
-    input_vjp, seeded_pullback, node_forward, node_output, rule_layer
+using RelevancePropagation: input_vjp, seeded_pullback, remove_activation
 using Test
 
 using Lux
@@ -62,21 +61,16 @@ setup_testmode(layer) = (l=Lux.setup(StableRNG(123), layer); (l[1], Lux.testmode
             s = randn(StableRNG(17), Float32, size(z_ref)...)
             dx_ref = only(back_ref(s))
             @test seeded_pullback(layer, x, ps, st, s) ≈ dx_ref
-
-            # node_forward splits the forward pass into affine part and
-            # activation; node_output must reconstruct the layer output.
-            z, y = node_forward(layer, x, ps, st)
-            @test y ≈ z_ref
-            @test node_output(layer, z) ≈ z_ref
         end
     end
 end
 
 # The hand-written fast-path VJPs must agree with the nested-AD fallback on
-# the activation-stripped layers `propagate` uses them on.
+# the activation-stripped layers `propagate` uses them on
+# (the wrap-time split guarantees rules only see affine layers).
 @testset "input_vjp fast paths vs nested AD" begin
     for (name, layer, x) in LAYERS
-        f = rule_layer(layer)
+        f = remove_activation(layer)
         f isa Union{Dense,Scale,Conv,ConvTranspose} || continue
         @testset "$name" begin
             ps, st = setup_testmode(layer)

@@ -28,6 +28,27 @@ const LRPSupportedLayer = Union{
     LRPSupportedActivation,
 }
 
+# Lux wraps bare functions used as layers in `WrappedFunction`,
+# and split-out activations — from `ModelSurgeon.split_activation` or a
+# custom canonization — are broadcasts of the activation function.
+# `wrapped_function` recovers the underlying function
+# for the model checks and composite type matching.
+wrapped_function(layer::WrappedFunction) = unwrap_broadcast(layer.func)
+unwrap_broadcast(f::Base.Fix1{typeof(broadcast)}) = f.x
+unwrap_broadcast(f) = f
+
+"""
+    is_activation_layer(layer)
+
+Check whether a layer is an activation-only layer:
+a `WrappedFunction` over an [`LRPSupportedActivation`](@ref),
+either applied directly or as a broadcast.
+"""
+is_activation_layer(layer) = false
+function is_activation_layer(layer::WrappedFunction)
+    wrapped_function(layer) isa LRPSupportedActivation
+end
+
 # Introspection on Lux parameter NamedTuples, consumed by the LRP rules
 # (see `rules.jl`).
 has_weight(ps) = haskey(ps, :weight)

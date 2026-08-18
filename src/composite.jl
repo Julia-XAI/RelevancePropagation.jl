@@ -281,9 +281,12 @@ function get_type_rule(layer, map)
 end
 # Lux wraps bare functions used as layers in `WrappedFunction`;
 # type maps match either the wrapper or the wrapped function itself.
+# Split-out activations are broadcasts of the activation function,
+# which `wrapped_function` sees through.
 function get_type_rule(layer::WrappedFunction, map)
+    f = wrapped_function(layer)
     for (T, rule) in map
-        if layer isa T || layer.func isa T
+        if layer isa T || f isa T
             return rule
         end
     end
