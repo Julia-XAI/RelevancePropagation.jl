@@ -35,6 +35,11 @@ and will be tested in follow-up work on real hardware.
   **exactly** (max deviation `0.0`; JLArray computes on the CPU,
   so exact agreement is the expected outcome, and GPU testsets on JLArray
   can assert near-exact equality rather than a loose `rtol`).
+- *2026-08-18 (design decision):* activations are split out of
+  rule-carrying nodes at wrap time and handled by `PassRule` nodes;
+  `ZBoxRule` adopts the affine-only semantics of its docstring —
+  an intentional, documented divergence from v3
+  (see "Activity patterns for the rule layer").
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -203,11 +208,13 @@ Consequences:
   `dot(first(apply(layer, x, ps, st)), s)` (`src/autodiff.jl:230`),
   so any layer without an `input_vjp` fast path is unusable on GPU arrays.
   Measured on Metal: `MaxPool`, `MeanPool` and `BatchNorm` all fail this way.
-  Note that fast-path *layer types* do not guarantee fast-path *calls*:
-  every fast path declines when `activation !== identity`,
-  which `ZBoxRule`'s `c`-term and sub-model differentiation units hit
-  on realistic models — see
-  "Activity patterns for the rule layer" below for the inventory.
+  Two call sites reach it even on fast-path layer types:
+  `ZBoxRule`'s `c`-term, which today passes the layer *with* its
+  activation (the fast paths guard on `activation === identity` and
+  decline — resolved by the decided wrap-time activation split,
+  see "Activity patterns for the rule layer" below),
+  and sub-models treated as one differentiation unit,
+  for which no fast path exists at all.
   CUDA is the one backend where `seeded_pullback` *may* work
   (its 773-line `EnzymeCoreExt` gives Enzyme rules for `cufunction`,
   `cudaconvert`, kernel launches) — but the design should not rely on it:
@@ -519,35 +526,124 @@ Notes per pattern:
   parameter — each `(layer type, width)` pair compiles once per
   session. Prefer a small fixed set of widths.
 
-### Gap found: `ZBoxRule`'s `c`-term reaches `seeded_pullback` on real models
+### The `ZBoxRule` activation gap (resolved by the wrap-time split)
 
-`c = input_vjp(layer, aᵏ, ps, st, s)` (`src/rules.jl:368`) goes through
-the layer **with its activation**, and every fast path declines when
-`activation !== identity` (`src/autodiff.jl:245,250,255,269`).
+To be precise about where activations live in the engine *today*
+(the wrap-time split below changes this):
+model preparation does *not* strip them — `LayerWithRule` wraps the
+original layer, because the node's forward must produce the true
+output `y = σ.(z)` for downstream layers.
+Stripping happens at the use sites instead:
+`node_forward` caches the pre-activation through `remove_activation`,
+and the rule bodies call `input_vjp` on `f = rule_layer(layer)`,
+the stripped layer.
+Every `input_vjp` call in the generic `propagate` and in
+`ZPlusRule`/`AlphaBetaRule`/`GeneralizedGammaRule` goes through `f`,
+so their fast paths fire regardless of the model's activations.
+
+The one exception is `ZBoxRule`'s `c`-term
+(`c = input_vjp(layer, aᵏ, ps, st, s)`, `src/rules.jl:368`),
+which deliberately passes the *unstripped* layer;
+the fast paths guard on `activation === identity`
+(`src/autodiff.jl:245,250,255,269`) and decline.
 So `ZBoxRule` on its canonical target — a `Conv(..., relu)` or
 `Dense(..., relu)` input layer — falls back to `seeded_pullback`
 today, and is therefore dead on Metal/JLArray *even after Change B*.
-The same applies to any sub-model treated as a single differentiation
-unit (`wrap_rules` with one rule on a `Chain`/`Parallel`)
-and to CRP's container fallback (`src/crp.jl:54`).
+This is v3-faithful, verified against `main`:
+v3's ZBox also ran `pullback(layer, aᵏ)` through the original
+activation-bearing layer, while its modified `layer⁺`/`layer⁻`
+were stripped (`copy_layer` defaults to `σ=identity`).
+In v3 that pullback was Zygote's, which had GPU rules,
+so the issue is new to the Enzyme port, not to the rule.
 
-Options, in preference order:
+Separately — different mechanism, same destination:
+sub-models treated as a single differentiation unit
+(`wrap_rules` with one rule on a `Chain`/`Parallel`)
+and CRP's container fallback (`src/crp.jl:54`)
+reach `seeded_pullback` because *no* fast path exists for
+containers, activations aside.
 
-1. **Activation-aware fast path**: for an elementwise activation σ,
-   the VJP through `σ ∘ affine` is the affine fast path applied to
-   `s .* σ′.(zᵏ)` with `zᵏ` the cached pre-activation.
-   Needs `σ′` for the supported activation set
-   (`relu`, `identity`, `leakyrelu`, …) as one-line broadcasts —
-   GPU-clean and closes the gap on all backends.
-2. **Document as CPU/CUDA-only** and extend the model checks;
-   the split-thunk rewrite above keeps it exact on CPU (measured)
-   and plausibly working on CUDA.
-3. **Revisit the semantics**: the `ZBoxRule` docstring formula is
-   affine-only, while the code comment says "including activation"
-   deliberately (presumably v3-faithful, the reference tests pass).
-   If the σ should not be there, option 1 becomes unnecessary for
-   ZBox — but that is a numerics question to settle against the
-   literature and v3 references first, not a GPU question.
+**Resolution (decided):** the wrap-time activation split below.
+`ZBoxRule` thereby adopts the affine-only semantics of its docstring
+formula — an intentional divergence from v3:
+its references are regenerated once,
+and the change is called out in the 4.0 changelog.
+The alternative that would have preserved v3 numerics exactly —
+an activation-aware fast path `affine_vjp(s .* σ′.(zᵏ))` —
+was considered and rejected: it patches the gap with a σ′ table
+instead of dissolving it,
+and keeps the use-site stripping machinery alive.
+
+### Decided: activations are split out at wrap time (`PassRule` nodes)
+
+The engine will no longer wrap full layers and strip σ at each use
+site. Activations are split into their own nodes when the model is
+wrapped: the affine part carries the rule, and the activation follows
+as a separate node whose backward is the explicit pass-through LRP
+prescribes. The activation stays in the compute graph —
+the forward is unchanged — but the reverse ignores it.
+
+Most of the pieces already exist:
+
+- `ModelSurgeon.split_activation` performs exactly this surgery —
+  `Chain(remove_activation(layer), WrappedFunction(Base.Fix1(broadcast, σ)))`
+  with rebuilt `ps`/`st` (`src/ModelSurgeon/canonize.jl:72-77`),
+  including the `LayerNorm` case.
+- `PassRule` already *is* the "SkipRule": elementwise activations
+  preserve shape, so `reshape_relevance` is a no-op pass-through.
+  The activation node is a plain `LayerWithRule(PassRule(), …)` —
+  no new rule type, no new `EnzymeRules` function,
+  and Enzyme never differentiates σ (the custom rule covers it),
+  so the node is GPU-clean.
+
+One structural constraint shapes the implementation:
+the wrapped model is applied with the *original* `ps`/`st` trees
+(the wrappers are `ps`/`st`-transparent), so activation nodes cannot
+simply be appended as chain siblings — extra top-level entries would
+need matching `ps`/`st` entries. Either the split runs on the triple
+at `LRP` construction (the `split_activation` path, which rebuilds
+`ps`/`st`, with `PassRule` entries inserted into the rules tree in
+lockstep), or the affine part and the activation live inside one
+transparent pair-wrapper whose `ps` routes to the affine child.
+The pair-wrapper realization is preferred:
+it keeps the original `ps`/`st` trees, the rule keys and
+CRP's positional layer indices valid,
+at the cost of CRP's forward loop learning the two-stage node.
+
+What it buys:
+
+- Deletes the use-site machinery — `ActivationSplitLayer`,
+  the `node_forward` split, `node_output`, `rule_layer`
+  (`src/autodiff.jl:66-109`) — and the six `rule_layer` call sites
+  in rule bodies. Stripping happens once at construction
+  instead of on every call.
+- Makes "LRP ignores activations" a structural property instead of a
+  per-call-site convention, uniformly extended to layers the current
+  split skips: an un-canonized `BatchNorm(…, relu)` becomes
+  affine-BN + σ node, composing with the `BatchNorm` fast path
+  (task 9).
+- Fixes an existing inconsistency: a model whose activations were
+  *already* split out (`canonize`) currently gets the true σ-VJP at
+  each `WrappedFunction` node via `seeded_pullback` — numerically
+  different from the fused handling, and GPU-dead. With `PassRule`
+  assigned to split-out activations, fused and pre-split models
+  agree, and both are GPU-clean.
+- Dissolves the `ZBoxRule` gap architecturally
+  (previous subsection).
+
+The accepted consequence: after the split the node has no unstripped
+layer, so ZBox's σ-inclusive `z`/`c` terms are no longer expressible —
+`ZBoxRule` becomes affine-only, as decided above.
+(Exempting ZBox-ruled layers from the split was considered and
+rejected: it keeps the machinery alive for one rule and forfeits
+most of the simplification.)
+Everything else is numerics-neutral: the other rule bodies are
+already all-affine, and `GeneralizedGammaRule`'s masks are unchanged
+because `leakyrelu` preserves sign (`z .> 0 ⟺ σ(z) .> 0`).
+Remaining costs: one extra custom-rule node and shadow allocation
+per activation, and the port's acceptance criterion becomes
+"bit-identical except the documented ZBox change"
+instead of "suite bit-identical".
 
 ### CRP's feature loop is the same-point-many-seeds case
 
@@ -713,20 +809,29 @@ Ordered by how likely they are to matter:
 3. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
    (`src/autodiff.jl`, next to the `Conv` methods),
    cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
-4. Rewrite the generic VJP fallback from `seeded_pullback`'s
+4. Split activations out of rule-carrying nodes at wrap time
+   ("Decided" above). Preferred realization: the transparent
+   pair-wrapper — affine child carries the rule and the `ps`/`st`
+   routing, σ child is a `PassRule` node;
+   `ModelSurgeon.activation_fn`/`remove_activation` provide the
+   surgery. Delete `ActivationSplitLayer`, the `node_forward` split,
+   `node_output` and `rule_layer`; adapt CRP's forward loop to the
+   two-stage node. `ZBoxRule` becomes affine-only:
+   regenerate its references and document the divergence from v3
+   in the changelog.
+   Acceptance: the CPU test suite is bit-identical except the
+   documented ZBox change.
+5. Rewrite the generic VJP fallback from `seeded_pullback`'s
    combined-mode `dot` loss to the two-phase split-mode `prepare_vjp`
    primitive and re-express the rule bodies on it
    ("Activity patterns for the rule layer" above) —
    removes the double forward on the fallback path and the last
    `Active` scalar below the engine.
+   Builds on task 4's simplified, all-affine rule bodies.
    Stage 2, optional and separable: width-2 `BatchDuplicated` tapes
    for `AlphaBetaRule`/`GeneralizedGammaRule`.
    Acceptance for both stages: the CPU test suite is bit-identical
    (both patterns measured exact on `Dense`, `probe5.jl`).
-5. Close the `ZBoxRule` activation gap
-   ("Gap found" above; preferred: the activation-aware fast path
-   `affine_vjp(s .* σ′.(zᵏ))` for the supported activation set),
-   or document the limitation and extend the model checks.
 6. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
 7. Make `zbox_input` allocate through the input
    (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`).
@@ -760,10 +865,11 @@ Tasks 1–9 are self-contained, independently testable, and generic
 (no backend appears in `src/`).
 Tasks 1 and 2 are the ones that make GPU arrays work at all;
 task 3 extends that from `Dense`-family models to CNNs on hardware
-backends; task 4 is the rule-layer refactor that removes the last
-`Active` scalar (a CPU efficiency win now, the CUDA fallback path
-later); task 5 closes the one rule/layer combination the fast paths
-miss; tasks 6–9 are correctness/performance fixes that
+backends; task 4 is the structural change that retires the
+activation special cases (including the one rule/layer combination
+the fast paths missed); task 5 removes the last `Active` scalar from
+the rule layer (a CPU efficiency win now, the CUDA fallback path
+later); tasks 6–9 are correctness/performance fixes that
 apply to every backend equally.
 
 ## Relationship to `PLAN_GPU.md`
