@@ -203,6 +203,11 @@ Consequences:
   `dot(first(apply(layer, x, ps, st)), s)` (`src/autodiff.jl:230`),
   so any layer without an `input_vjp` fast path is unusable on GPU arrays.
   Measured on Metal: `MaxPool`, `MeanPool` and `BatchNorm` all fail this way.
+  Note that fast-path *layer types* do not guarantee fast-path *calls*:
+  every fast path declines when `activation !== identity`,
+  which `ZBoxRule`'s `c`-term and sub-model differentiation units hit
+  on realistic models — see
+  "Activity patterns for the rule layer" below for the inventory.
   CUDA is the one backend where `seeded_pullback` *may* work
   (its 773-line `EnzymeCoreExt` gives Enzyme rules for `cufunction`,
   `cudaconvert`, kernel launches) — but the design should not rely on it:
@@ -420,6 +425,151 @@ and no other modifications:
 
 The Metal deviations are Float32 rounding noise.
 
+## Activity patterns for the rule layer
+
+The rules in `docs/src/rules.md` decompose into a handful of AD shapes,
+and the activity system serves each differently.
+The claims marked *measured* are from `probe5.jl` (CPU, `Dense`,
+Enzyme v0.13.199): all comparisons are `==`, not `isapprox`.
+
+### The primitive: a one-shot VJP that also returns the primal
+
+On the fallback path (layers without an `input_vjp` fast path),
+the generic `propagate` (`src/rules.jl:39-49`) runs the modified forward
+**twice**: once in `apply` for the denominator z̃ (`src/rules.jl:45`),
+and again inside `seeded_pullback`'s combined-mode `autodiff`.
+A `ReverseSplitWithPrimal` thunk collapses this:
+its augmented forward returns `(tape, primal, shadow)`,
+the primal *is* z̃, the seed `s = Rᵏ⁺¹ ./ stab(z̃)` is written into the
+shadow, and one reverse consumes the tape — one forward instead of two,
+and no `Active` scalar anywhere (the same argument as Change A,
+one level down).
+*Measured:* primal `==` the separate `apply`,
+pullback `==` `seeded_pullback`, for both identity and `relu` `Dense`.
+
+Proposed shape — replace the raw `seeded_pullback` fallback with a
+two-phase primitive that both fast paths and the thunk implement:
+
+```julia
+prepare_vjp(layer, x, ps, st) -> (z̃, pullback!)   # pullback!(s) -> c
+```
+
+Fast-path layers return `(apply(layer, x, ps, st), s -> hand_vjp(s))`;
+generic layers run the augmented forward and close over the tape.
+Each `pullback!` is **single-use** — one `rev` per tape,
+honoring the `NOTES.md` finding that re-running a consumed tape
+aborts Julia. Rules needing several VJPs at *the same point*
+use batched shadows instead (below).
+
+Backend reach, measured: on CPU this is exact and halves fallback
+forwards; on JLArray the nested thunk still fails
+(`EnzymeRuntimeActivityError`, the `JLBackend` hole behind it),
+and Metal has `objc_msgSend` behind the same door —
+so this primitive improves CPU now and plausibly unlocks CUDA's
+fallback path, while fast paths remain the only mechanism
+on Metal/JLArray. Nothing about it regresses any backend.
+
+### Rule taxonomy
+
+Costs are for the fallback path, in layer forwards (F) and reverses (R);
+fast-path layers are unaffected (no Enzyme, already minimal).
+
+| pattern | rules | today | with thunks |
+|---|---|---|---|
+| no AD at all | `PassRule`, `LayerNormRule`, `FlatRule`/`Dense`, reshape fast paths | — | — |
+| cached z̃, one VJP | `ZeroRule`, `EpsilonRule` (z̃ = node-tape `zᵏ`) | 1F+1R | 1F+1R (0F+1R with a node-held tape, below) |
+| one modified forward, one VJP, same point | `GammaRule`, `WSquareRule`, `FlatRule` (generic layers) | 2F+1R | 1F+1R |
+| two points, one shared seed | `ZPlusRule` | 4F+2R | 2F+2R |
+| two points × two seeds | `AlphaBetaRule`, `GeneralizedGammaRule` | 8F+4R | 4F+2R (width-2 batch) |
+| three points, one seed | `ZBoxRule` | 5F+3R | 3F+3R |
+
+Notes per pattern:
+
+- **`ZeroRule`/`EpsilonRule`**: their VJP is through the unmodified
+  affine layer at the unmodified input — the very forward
+  `node_forward` already ran in the node's `augmented_primal`.
+  If the node built that forward *as* an augmented-forward thunk and
+  stored `(tape, pullback!)` alongside `zᵏ`, these rules would need no
+  forward at all in the reverse pass (0F+1R).
+  The node knows its rule (`LayerWithRule`), so this can be gated on a
+  trait (identity `modify_params`/`modify_input`, no fast path).
+  Costs tape memory per node — an optimization, not a requirement,
+  and unmeasured.
+- **`ZPlusRule`**: the seed needs *both* primals (`s` divides by
+  `z⁺ + z⁻`), so run both augmented forwards first, then both reverses.
+  Split mode expresses this ordering naturally;
+  combined mode cannot without recomputation.
+- **`AlphaBetaRule`/`GeneralizedGammaRule`**: the code already exploits
+  that the α/β (resp. ˡ/ʳ) variants share weights, routing the second
+  seed through the first variant's `input_vjp`
+  (`src/rules.jl:455-457,472-473,514-515,534-535`).
+  On the thunk path that is two seeds through **one tape** —
+  exactly `BatchDuplicated` width 2: one augmented forward per point,
+  one batched reverse with shadows `(sᵅ, sᵝ)`.
+  *Measured:* width-2 batch `==` two separate `seeded_pullback`s.
+  This is the only safe way to reuse a tape for a second seed —
+  a second `rev` call on the same tape is the documented abort.
+  The two crossed bias variants (`zᵝ⁺`, `zᵝ⁻`) still need two plain
+  forwards; only two of the four z's arrive as tape primals.
+- **`ZBoxRule`**: three *different* primal points `(aᵏ, l, h)` —
+  batching does not apply (Enzyme batches shadows at one point,
+  never primals). Three independent thunks; `z⁺`/`z⁻` arrive as
+  primals, `z` comes from the node cache.
+- Thunks are cached per type signature, and the batch width is a type
+  parameter — each `(layer type, width)` pair compiles once per
+  session. Prefer a small fixed set of widths.
+
+### Gap found: `ZBoxRule`'s `c`-term reaches `seeded_pullback` on real models
+
+`c = input_vjp(layer, aᵏ, ps, st, s)` (`src/rules.jl:368`) goes through
+the layer **with its activation**, and every fast path declines when
+`activation !== identity` (`src/autodiff.jl:245,250,255,269`).
+So `ZBoxRule` on its canonical target — a `Conv(..., relu)` or
+`Dense(..., relu)` input layer — falls back to `seeded_pullback`
+today, and is therefore dead on Metal/JLArray *even after Change B*.
+The same applies to any sub-model treated as a single differentiation
+unit (`wrap_rules` with one rule on a `Chain`/`Parallel`)
+and to CRP's container fallback (`src/crp.jl:54`).
+
+Options, in preference order:
+
+1. **Activation-aware fast path**: for an elementwise activation σ,
+   the VJP through `σ ∘ affine` is the affine fast path applied to
+   `s .* σ′.(zᵏ)` with `zᵏ` the cached pre-activation.
+   Needs `σ′` for the supported activation set
+   (`relu`, `identity`, `leakyrelu`, …) as one-line broadcasts —
+   GPU-clean and closes the gap on all backends.
+2. **Document as CPU/CUDA-only** and extend the model checks;
+   the split-thunk rewrite above keeps it exact on CPU (measured)
+   and plausibly working on CUDA.
+3. **Revisit the semantics**: the `ZBoxRule` docstring formula is
+   affine-only, while the code comment says "including activation"
+   deliberately (presumably v3-faithful, the reference tests pass).
+   If the σ should not be there, option 1 becomes unnecessary for
+   ZBox — but that is a numerics question to settle against the
+   literature and v3 references first, not a GPU question.
+
+### CRP's feature loop is the same-point-many-seeds case
+
+Below the concept layer, CRP re-runs the full `propagate` per feature
+(`src/crp.jl:96-113`) although only the seed differs between features —
+every modified forward and denominator is recomputed `n_features` times.
+Two remedies, both post-4.0 performance work:
+for fast-path layers, hoist the forwards/denominators out of the
+feature loop and re-run only the cheap hand VJPs;
+for thunk-path layers, one tape per node with `BatchDuplicated`
+width `n_features` (or fixed chunks to bound compilation).
+The future SmoothDiff.jl port has the same shape
+(expected VJPs = many seeds at one point) and would reuse the
+same machinery.
+
+None of this touches the three `EnzymeRules` custom rules:
+everything in this section lives *inside* `propagate`,
+which Enzyme treats as opaque. Only end-to-end batching
+(several output selections in one reverse pass over the model)
+would require `BatchDuplicated` methods on
+`lrp_node`/`lrp_connection`/`tap_relevance`.
+
 ## What a JLArrays CI job buys
 
 With the tasks below landed, a `test_gpu.jl` running on JLArrays in
@@ -504,20 +654,22 @@ Ordered by how likely they are to matter:
   it drives `propagate` directly and never touches the Enzyme
   end-to-end pass, so once feature selection is fixed
   (or run on a host copy of the relevance) CRP should work.
-- **Batched seeds via `BatchDuplicated` (future, out of 4.0 scope).**
-  Multi-seed use cases (several output selections per input,
-  CRP-style repeated passes) currently mean one reverse pass per seed,
-  and `NOTES.md` records that *reusing* a consumed split-mode tape
-  for several seeds aborts Julia.
-  Enzyme's documented mechanism for exactly this is width-N shadows:
-  `BatchDuplicated` arguments and return compute N pullbacks
-  in a single pass, no tape reuse involved.
-  It is out of scope because the custom rules dispatch on
+- **End-to-end batched seeds via `BatchDuplicated`
+  (future, out of 4.0 scope).**
+  Several output selections per input currently mean one full reverse
+  pass per seed, and `NOTES.md` records that *reusing* a consumed
+  split-mode tape for several seeds aborts Julia.
+  Enzyme's documented mechanism is width-N shadows —
+  measured working and exact at the rule-internal level
+  ("Activity patterns for the rule layer" above),
+  where it needs no dispatch changes because it stays inside
+  `propagate`. Batching the *end-to-end* pass is the part that is
+  out of scope: the custom rules dispatch on
   `::Type{<:Union{Duplicated,DuplicatedNoNeed}}` and `x::Duplicated`
   (`src/autodiff.jl:111-148`, likewise `lrp_connection` and
-  `tap_relevance`), so batch mode would need `BatchDuplicated`
-  methods with tuple-of-shadows handling throughout —
-  but it is the principled replacement for tape reuse
+  `tap_relevance`), so it would need `BatchDuplicated` methods with
+  tuple-of-shadows handling throughout —
+  the principled replacement for tape reuse
   if multi-seed performance ever matters.
 - **Layerwise relevance taps** (`TappedLayer`, `src/autodiff.jl:298-338`)
   were not tested under split mode on any GPU array
@@ -561,13 +713,27 @@ Ordered by how likely they are to matter:
 3. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
    (`src/autodiff.jl`, next to the `Conv` methods),
    cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
-4. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
-5. Make `zbox_input` allocate through the input
+4. Rewrite the generic VJP fallback from `seeded_pullback`'s
+   combined-mode `dot` loss to the two-phase split-mode `prepare_vjp`
+   primitive and re-express the rule bodies on it
+   ("Activity patterns for the rule layer" above) —
+   removes the double forward on the fallback path and the last
+   `Active` scalar below the engine.
+   Stage 2, optional and separable: width-2 `BatchDuplicated` tapes
+   for `AlphaBetaRule`/`GeneralizedGammaRule`.
+   Acceptance for both stages: the CPU test suite is bit-identical
+   (both patterns measured exact on `Dense`, `probe5.jl`).
+5. Close the `ZBoxRule` activation gap
+   ("Gap found" above; preferred: the activation-aware fast path
+   `affine_vjp(s .* σ′.(zᵏ))` for the supported activation set),
+   or document the limitation and extend the model checks.
+6. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
+7. Make `zbox_input` allocate through the input
    (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`).
-6. Broadcast the `FlatRule`/`Dense` fast path (`src/rules.jl:613`).
-7. Add a `BatchNorm` `input_vjp` fast path
+8. Broadcast the `FlatRule`/`Dense` fast path (`src/rules.jl:613`).
+9. Add a `BatchNorm` `input_vjp` fast path
    (testmode affine map; generic broadcast).
-8. Add `test/test_gpu.jl`, parameterized over the device like
+10. Add `test/test_gpu.jl`, parameterized over the device like
    ExplainableAI.jl's (`device = Metal.functional() ? mtl : jl`,
    with `fmap`/`Adapt` for the `ps`/`st` trees).
    The JLArrays leg runs in standard CI on every PR and asserts
@@ -578,9 +744,9 @@ Ordered by how likely they are to matter:
    Conv/pool testsets are gated on a functional hardware backend
    (Metal locally / self-hosted; CUDA via Buildkite in follow-up)
    and compare at `rtol=1e-5` (Float32).
-9. Follow-up (separate machine): run the same testset on CUDA,
-   which by the argument above should require zero package changes.
-10. Upstream reports:
+11. Follow-up (separate machine): run the same testset on CUDA,
+    which by the argument above should require zero package changes.
+12. Upstream reports:
     Metal.jl — `make_zero` aliasing, `EnzymeCoreExt` request (blocker 1);
     Enzyme.jl — `objc_msgSend` on Metal, no `mkcontext` for
     KernelAbstractions' `JLBackend` (blocker 2);
@@ -590,11 +756,14 @@ Ordered by how likely they are to matter:
     that needs Enzyme to differentiate a real array operation
     will be CPU/CUDA-only.
 
-Tasks 1–7 are self-contained, independently testable, and generic
+Tasks 1–9 are self-contained, independently testable, and generic
 (no backend appears in `src/`).
 Tasks 1 and 2 are the ones that make GPU arrays work at all;
 task 3 extends that from `Dense`-family models to CNNs on hardware
-backends; tasks 4–7 are correctness/performance fixes that
+backends; task 4 is the rule-layer refactor that removes the last
+`Active` scalar (a CPU efficiency win now, the CUDA fallback path
+later); task 5 closes the one rule/layer combination the fast paths
+miss; tasks 6–9 are correctness/performance fixes that
 apply to every backend equally.
 
 ## Relationship to `PLAN_GPU.md`
@@ -644,3 +813,9 @@ into `test/test_gpu.jl` rather than restored verbatim:
 - `probe4.jl` — `propagate` per rule on JLArray vs CPU (dev `0.0`,
   plus the `ZBoxRule`/`GeneralizedGammaRule` failures),
   and split-mode `lrp_split` on JLArray: dev `0.0` vs CPU `analyze`.
+- `probe5.jl` — the rule-layer activity patterns:
+  `vjp_with_primal` (split thunk) `==` `apply` + `seeded_pullback`
+  on CPU for identity and `relu` `Dense`;
+  `BatchDuplicated` width-2 `==` two separate pullbacks (CPU);
+  the same nested thunk on JLArray still fails
+  (`EnzymeRuntimeActivityError`).
