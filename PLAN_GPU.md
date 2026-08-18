@@ -41,6 +41,15 @@ and will be tested in follow-up work on real hardware.
   `ZBoxRule` adopts the affine-only semantics of its docstring —
   an intentional, documented divergence from v3
   (see "Activity patterns for the rule layer").
+- *2026-08-18 (ordering + forward-equivalence tests):* the activation
+  split moves to the front of the task list. It is the largest
+  structural change, needs no GPU to test, and every later task then
+  lands on the final architecture instead of being partially reworked
+  by it. Its acceptance gains an explicit forward-equivalence testset:
+  the split's core assumption — stripped forward plus broadcast σ
+  reproduces the fused layer output exactly — becomes a tested
+  invariant instead of an implicit one
+  (see "Forward-pass equivalence").
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -586,10 +595,16 @@ the forward is unchanged — but the reverse ignores it.
 
 Most of the pieces already exist:
 
-- `ModelSurgeon.split_activation` performs exactly this surgery —
-  `Chain(remove_activation(layer), WrappedFunction(Base.Fix1(broadcast, σ)))`
-  with rebuilt `ps`/`st` (`src/ModelSurgeon/canonize.jl:72-77`),
-  including the `LayerNorm` case.
+- `ModelSurgeon.activation_fn`/`remove_activation`
+  (`src/ModelSurgeon/lux_layers.jl:40-55`) provide the surgery for the
+  pair-wrapper realization: strip σ from the leaf, apply it in a second
+  node. (`ModelSurgeon.split_activation` is the same idea as a
+  `ps`-rebuilding `Chain` (`src/ModelSurgeon/canonize.jl:72-77`) —
+  the right tool for the construction-time realization, but its
+  `LayerNorm` method also moves the affine part out into a `Scale`,
+  which the wrap-time split must *not* do: the `LayerNorm` node keeps
+  its affine parameters, only σ is stripped, and `LayerNormRule`'s
+  internal `Scale` handling then sees `identity` and simplifies.)
 - `PassRule` already *is* the "SkipRule": elementwise activations
   preserve shape, so `reshape_relevance` is a no-op pass-through.
   The activation node is a plain `LayerWithRule(PassRule(), …)` —
@@ -608,16 +623,29 @@ lockstep), or the affine part and the activation live inside one
 transparent pair-wrapper whose `ps` routes to the affine child.
 The pair-wrapper realization is preferred:
 it keeps the original `ps`/`st` trees, the rule keys and
-CRP's positional layer indices valid,
-at the cost of CRP's forward loop learning the two-stage node.
+CRP's positional layer indices valid, and it leaves
+`length(model.layers)` unchanged — so `insert_taps` indices and the
+`layerwise_relevances` contract (one entry per model child) survive
+untouched — at the cost of CRP's forward loop learning the
+two-stage node.
+Sub-models treated as one differentiation unit are exempt:
+the split applies to rule-carrying leaves only, and activations
+inside an opaque sub-model stay where they are
+(that path remains `seeded_pullback`-bound and CPU-only, as before).
 
 What it buys:
 
 - Deletes the use-site machinery — `ActivationSplitLayer`,
   the `node_forward` split, `node_output`, `rule_layer`
-  (`src/autodiff.jl:66-109`) — and the six `rule_layer` call sites
-  in rule bodies. Stripping happens once at construction
-  instead of on every call.
+  (`src/autodiff.jl:66-109`) — and all of their call sites:
+  `rule_layer` in the generic `propagate` and four rule bodies
+  (`src/rules.jl:40,357,401,452,511`), `node_output` in
+  `ZBoxRule`/`GeneralizedGammaRule` (`src/rules.jl:363,528`), and
+  `node_forward` in `LayerNormRule` (`src/rules.jl:586`) and in
+  CRP's forward loop (`src/crp.jl:75`).
+  `LayerNormRule`'s internal `Scale` then always carries `identity`,
+  collapsing its `node_forward`/`rule_layer` indirection.
+  Stripping happens once at construction instead of on every call.
 - Makes "LRP ignores activations" a structural property instead of a
   per-call-site convention, uniformly extended to layers the current
   split skips: an un-canonized `BatchNorm(…, relu)` becomes
@@ -629,6 +657,20 @@ What it buys:
   different from the fused handling, and GPU-dead. With `PassRule`
   assigned to split-out activations, fused and pre-split models
   agree, and both are GPU-clean.
+  The mechanism differs by origin, and only the first half is
+  automatic: wrap-created σ nodes carry `PassRule` structurally,
+  while a standalone activation layer already present in the model
+  gets whatever rule the user or composite assigns.
+  The composite presets already map `typeof(identity)` to `PassRule`
+  (`src/composite_presets.jl`); extend that mapping to supported
+  activation-only layers (`WrappedFunction`s over
+  `LRPSupportedActivation`s), and decide whether the no-rules `LRP`
+  constructor (today: `ZeroRule` everywhere) does the same —
+  recommended, since a default-constructed pre-split model otherwise
+  keeps hitting `seeded_pullback` on its σ nodes, GPU-dead and
+  inconsistent with the fused form. No current test model contains a
+  standalone activation node, so this changes no existing references
+  either way.
 - Dissolves the `ZBoxRule` gap architecturally
   (previous subsection).
 
@@ -645,6 +687,46 @@ Remaining costs: one extra custom-rule node and shadow allocation
 per activation, and the port's acceptance criterion becomes
 "bit-identical except the documented ZBox change"
 instead of "suite bit-identical".
+
+### Forward-pass equivalence (the split's safety net)
+
+The split rests on one numerical assumption: applying the stripped
+layer and then broadcasting σ reproduces the fused layer's output
+bit-for-bit. The engine already relies on this *today* —
+`node_forward` computes `y = σ.(z)` from the stripped forward and
+feeds that recomposed `y` to downstream layers — but nothing tests it
+directly, and Lux routes activations through LuxLib's fused kernels
+(`fused_dense_bias_activation`, `fused_conv_bias_activation`),
+exactly the kind of code that could legally reassociate.
+
+The split task therefore adds an explicit equivalence testset:
+assert `==` on CPU between `first(apply(model, x, ps, st))` and the
+wrapped model's forward, for every model shape in the test suite —
+`Dense`/`Scale`/`Conv` with `relu`/`gelu`/`leakyrelu` activations,
+un-canonized `BatchNorm`+σ, both `LayerNorm` variants, nested
+`Chain`s, `Parallel`/`SkipConnection`, a container-as-unit sub-model,
+a tap-inserted model, and CRP's forward loop (`as[end]`).
+`Explanation.output` falls under the same assertion.
+If a fused LuxLib path ever breaks bit-equality, this testset is the
+tripwire; relaxing it to `isapprox` for a specific layer/activation
+pair is a deliberate, documented decision, not a default.
+The device legs repeat the assertion in `test_gpu.jl`
+(exact on JLArray; Metal compares fused GPU kernels against the split
+path, so tight `rtol` rather than guaranteed exactness).
+
+Test adaptation, per the no-test-deletion policy:
+the per-layer `propagate` testsets currently pass activation-bearing
+layers (`Dense(2 => 2, relu)`, `Scale(2, relu)`, `Conv_relu`, the
+`leakyrelu` `GeneralizedGammaRule` case). Under the new contract
+`propagate` only ever sees affine layers, so the test harness strips
+the activation before calling and *keeps* the reference values —
+propagation already went through the stripped layer, so they are
+unchanged except `ZBoxRule`'s. `GeneralizedGammaRule`'s masks now
+read the affine output instead of `σ(z)`; `leakyrelu` preserves sign,
+so its references also hold. Direct tests of removed helpers
+(`rule_layer` at `test/test_rules.jl:103`, any
+`node_forward`/`node_output` assertions) are adapted to their
+structural replacements, not deleted.
 
 ### CRP's feature loop is the same-point-many-seeds case
 
@@ -700,7 +782,7 @@ NNlib entry points with cuDNN implementations, or generic Enzyme API —
 no Metal- or JLArray-specific code remains in the package.
 On the CUDA side, the three risk points are each already covered upstream:
 `make_zero` (CUDA's `EnzymeCoreExt` ships the correct methods, and after
-task 1 we no longer call it anyway), conv/pooling (cuDNN via NNlibCUDA),
+task 2 we no longer call it anyway), conv/pooling (cuDNN via NNlibCUDA),
 and Enzyme plumbing over device arrays (the same `EnzymeCoreExt`,
 the most mature Enzyme-GPU integration there is).
 Remaining risk is untested-in-anger thunk plumbing over `CuArray`
@@ -723,7 +805,7 @@ Both suspicions turned out to be wrong, and the recommendation changed:
 - **The `FlatRule`/`Dense` fast path is a performance issue, not a
   correctness one** — it runs on both backends (JLArray dev `0.0`).
 - **JLArrays is a real CI target, not just a smoke test** —
-  *after* task 1. The earlier caveat
+  *after* task 2. The earlier caveat
   ("`make_zero` aliases `JLArray`, masking everything else")
   is resolved by switching the package to `Base.zero`;
   with that plus Change A, the whole `Dense`-family engine
@@ -796,41 +878,58 @@ Ordered by how likely they are to matter:
 
 ## Task list
 
-1. Switch the five `make_zero` call sites to `Base.zero`
-   (`src/lrp.jl:217`, `src/autodiff.jl:122,180,216,320`).
-   Acceptance: JLArray end-to-end run passes *without* any
-   `EnzymeCore.make_zero` piracy in the test setup
-   (the probes patched it globally; see the caveat under blocker 1).
-   File the Metal.jl issue regardless, CUDA's ext as template.
-2. Replace `lrp_loss`/`detached_mask!`/`output_ref` in `call_analyzer`
-   with the split-mode `lrp_split` above (`src/lrp.jl:158-241`).
-   The seed enters as the `Duplicated` return's shadow;
-   no scalar loss (no `Active` return) may remain in the
-   differentiated region — see the activity notes under Change A.
-   Acceptance: the full CPU test suite passes unchanged —
-   the CPU result is bit-identical, so no references need regenerating.
-3. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
-   (`src/autodiff.jl`, next to the `Conv` methods),
-   cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
-4. Split activations out of rule-carrying nodes at wrap time
+1. Split activations out of rule-carrying nodes at wrap time
    ("Decided" above). Preferred realization: the transparent
    pair-wrapper — affine child carries the rule and the `ps`/`st`
    routing, σ child is a `PassRule` node;
    `ModelSurgeon.activation_fn`/`remove_activation` provide the
-   surgery. Delete `ActivationSplitLayer`, the `node_forward` split,
-   `node_output` and `rule_layer`; adapt CRP's forward loop to the
+   surgery; container-as-unit nodes are exempt.
+   Delete `ActivationSplitLayer`, the `node_forward` split,
+   `node_output` and `rule_layer` together with their rule-body call
+   sites; simplify `LayerNormRule`; adapt CRP's forward loop to the
    two-stage node. `ZBoxRule` becomes affine-only:
    regenerate its references and document the divergence from v3
    in the changelog.
-   Acceptance: the CPU test suite is bit-identical except the
-   documented ZBox change.
+   Acceptance, in order:
+   - the new forward-equivalence testset passes
+     ("Forward-pass equivalence" above): the wrapped model's forward
+     output `==` the original model's on CPU, for every test model;
+   - the CPU test suite is bit-identical except the documented ZBox
+     change, with the per-layer `propagate` testsets adapted to the
+     affine-layer contract (stripped in the harness, references kept),
+     not deleted;
+   - new end-to-end coverage for an un-canonized `BatchNorm(…, relu)`
+     model (its numerics are newly defined by the split; no prior
+     reference exists to preserve).
+2. Switch the five `make_zero` call sites to `Base.zero`
+   (`src/lrp.jl:217`, `src/autodiff.jl:122,180,216,320`).
+   On CPU this is behavior-neutral (`make_zero`'s fast `Array` method
+   already returns a fresh zeroed array), so the CPU suite is the
+   only immediate gate; the real acceptance is joint with task 3
+   below.
+   File the Metal.jl issue regardless, CUDA's ext as template.
+3. Replace `lrp_loss`/`detached_mask!`/`output_ref` in `call_analyzer`
+   with the split-mode `lrp_split` above (`src/lrp.jl:158-241`).
+   The seed enters as the `Duplicated` return's shadow;
+   no scalar loss (no `Active` return) may remain in the
+   differentiated region — see the activity notes under Change A.
+   Acceptance: the full CPU test suite passes unchanged
+   (bit-identical, no reference regeneration), and — jointly closing
+   task 2 — the JLArray end-to-end probe passes *without* any
+   `EnzymeCore.make_zero` piracy in the test setup
+   (the probes patched it globally; see the caveat under blocker 1).
+   Re-run the Metal end-to-end check here as well: the recorded
+   Metal/JLArray measurements predate task 1's restructuring.
+4. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
+   (`src/autodiff.jl`, next to the `Conv` methods),
+   cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
 5. Rewrite the generic VJP fallback from `seeded_pullback`'s
    combined-mode `dot` loss to the two-phase split-mode `prepare_vjp`
    primitive and re-express the rule bodies on it
    ("Activity patterns for the rule layer" above) —
    removes the double forward on the fallback path and the last
    `Active` scalar below the engine.
-   Builds on task 4's simplified, all-affine rule bodies.
+   Builds on task 1's simplified, all-affine rule bodies.
    Stage 2, optional and separable: width-2 `BatchDuplicated` tapes
    for `AlphaBetaRule`/`GeneralizedGammaRule`.
    Acceptance for both stages: the CPU test suite is bit-identical
@@ -847,8 +946,10 @@ Ordered by how likely they are to matter:
    The JLArrays leg runs in standard CI on every PR and asserts
    near-exact CPU agreement for: `analyze` end to end per rule on a
    `Dense`-family model (incl. `layerwise_relevances` and a composite),
+   the wrapped-forward equivalence assertion from task 1,
    `propagate` per `Dense`-compatible rule, `Dense`/`Scale`/`BatchNorm`
-   fast paths, and CRP once XAIBase is fixed.
+   fast paths, and CRP (`IndexedFeatures` immediately;
+   `TopNFeatures` once XAIBase is fixed).
    Conv/pool testsets are gated on a functional hardware backend
    (Metal locally / self-hosted; CUDA via Buildkite in follow-up)
    and compare at `rtol=1e-5` (Float32).
@@ -863,17 +964,20 @@ Ordered by how likely they are to matter:
     (`PLAN_REACTANT.md`, "Paths to Reactant compatibility");
     optional, and off this package's critical path.
     Blocker 2 is the large one and is not on this package's critical
-    path after tasks 2 and 3 — but it does mean any future feature
+    path after tasks 3 and 4 — but it does mean any future feature
     that needs Enzyme to differentiate a real array operation
     will be CPU/CUDA-only.
 
 Tasks 1–9 are self-contained, independently testable, and generic
 (no backend appears in `src/`).
-Tasks 1 and 2 are the ones that make GPU arrays work at all;
-task 3 extends that from `Dense`-family models to CNNs on hardware
-backends; task 4 is the structural change that retires the
-activation special cases (including the one rule/layer combination
-the fast paths missed); task 5 removes the last `Active` scalar from
+Task 1 comes first deliberately: it is the largest structural change,
+it needs no GPU to test, and every later task then lands on the final
+architecture instead of being partially reworked by it — it retires
+the activation special cases, including the one rule/layer
+combination the fast paths missed.
+Tasks 2 and 3 are the ones that make GPU arrays work at all;
+task 4 extends that from `Dense`-family models to CNNs on hardware
+backends; task 5 removes the last `Active` scalar from
 the rule layer (a CPU efficiency win now, the CUDA fallback path
 later); tasks 6–9 are correctness/performance fixes that
 apply to every backend equally.
@@ -918,7 +1022,7 @@ into `test/test_gpu.jl` rather than restored verbatim:
 - `probe2.jl` — Enzyme micro-probes on JLArray: `dot` (works),
   `sum(abs2, ·)`, broadcast, `seeded_pullback` (all fail; messages
   quoted under blocker 2). Patches `EnzymeCore.make_zero` for JLArray
-  to emulate task 1.
+  to emulate task 2.
 - `probe3.jl` — the current `dot`-seeded engine end to end on JLArray:
   fails for every rule set (`EnzymeNonScalarReturnException`);
   also `TopNFeatures` scalar indexing.
