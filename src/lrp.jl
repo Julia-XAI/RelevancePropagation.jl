@@ -174,23 +174,14 @@ end
 # Call to the LRP analyzer #
 #==========================#
 
-# The scalar loss whose Enzyme gradient w.r.t. `x` is the explanation:
-# `dot(mask, y)` seeds the reverse pass with the masked output relevance Rᴺ⁺¹,
-# and the rule-carrying nodes in `model` replace every VJP on the way down.
-function lrp_loss(model, x, ps, st, cap, ns, normalize)
-    y = first(apply(model, x, ps, st))
-    mask = detached_mask!(cap, y, ns, normalize)
-    return dot(mask, y)
-end
-
-# Capture the model output and build the output relevance seed.
-# Marked `EnzymeRules.inactive`, which detaches the mask from the
-# differentiated graph: the seed is a constant w.r.t. the model output.
-function detached_mask!(cap, y, ns::AbstractOutputSelector, normalize::Bool)
-    cap[] = copy(y)
-    return relevance_seed(y, ns(y), normalize)
-end
-EnzymeRules.inactive(::typeof(detached_mask!), args...) = nothing
+# The function the Enzyme reverse pass differentiates.
+# Its return value is array-valued (`Duplicated`),
+# so the relevance seed enters as the return shadow in split mode —
+# no scalar loss is manufactured,
+# and the differentiated region contains no array operation
+# outside the custom rules (a GPU-compatibility requirement:
+# Enzyme cannot differentiate GPU-array operations).
+model_output(model, x, ps, st) = first(apply(model, x, ps, st))
 
 function relevance_seed(y, idx, normalize::Bool)
     seed = zero(y)
@@ -200,16 +191,6 @@ function relevance_seed(y, idx, normalize::Bool)
         seed[idx] .= y[idx]
     end
     return seed
-end
-
-model_output(model, x, ps, st) = first(apply(model, x, ps, st))
-
-# Typed capture for the model output. The type is over-approximated by the
-# compiler, so the `Ref` stays valid (if less precise) when inference fails.
-function output_ref(model, x, ps, st)
-    T = Base.promote_op(model_output, typeof(model), typeof(x), typeof(ps), typeof(st))
-    T === Union{} && return Ref{Any}()
-    return Ref{T}()
 end
 
 # Insert relevance taps between the outermost children of the wrapped model.
@@ -233,28 +214,31 @@ function call_analyzer(
         model = insert_taps(model, store)
     end
 
-    dx = make_zero(input)
-    cap = output_ref(model, input, ps, st)
-    autodiff(
-        Reverse,
-        lrp_loss,
-        Active,
-        Const(model),
-        Duplicated(input, dx),
-        Const(ps),
-        Const(st),
-        Const(cap),
-        Const(ns),
-        Const(normalize_output_relevance),
+    # Split-mode reverse pass: the augmented forward returns the model output
+    # together with its shadow, the relevance seed is written into the shadow
+    # between forward and reverse — outside anything Enzyme differentiates —
+    # and the reverse pass accumulates the explanation into `dx`.
+    # `dx` is freshly zeroed because shadows are accumulators.
+    dx = zero(input)
+    fwd, rev = autodiff_thunk(
+        ReverseSplitWithPrimal,
+        Const{typeof(model_output)},
+        Duplicated,
+        Const{typeof(model)},
+        Duplicated{typeof(input)},
+        Const{typeof(ps)},
+        Const{typeof(st)},
     )
-    output = cap[]
+    tape, output, shadow = fwd(
+        Const(model_output), Const(model), Duplicated(input, dx), Const(ps), Const(st)
+    )
     output_selection = ns(output)
+    seed = relevance_seed(output, output_selection, normalize_output_relevance)
+    shadow .= seed
+    rev(
+        Const(model_output), Const(model), Duplicated(input, dx), Const(ps), Const(st), tape
+    )
 
-    extras = if isnothing(store)
-        nothing
-    else
-        seed = relevance_seed(output, output_selection, normalize_output_relevance)
-        (; layerwise_relevances=(dx, store..., seed))
-    end
+    extras = isnothing(store) ? nothing : (; layerwise_relevances=(dx, store..., seed))
     return Explanation(dx, input, output, output_selection, :LRP, :attribution, extras)
 end

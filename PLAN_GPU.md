@@ -68,6 +68,22 @@ and will be tested in follow-up work on real hardware.
   backward pass with max deviation `0.0`.
   Only the five composite-preset *show* references were regenerated
   (the presets now list `LRPSupportedActivation => PassRule()`).
+- *2026-08-18 (tasks 2+3 LANDED):* `make_zero` is gone from the package
+  (the four shadow allocations in `src/autodiff.jl` use `Base.zero`,
+  and the import is removed), and `call_analyzer` seeds in split mode:
+  `lrp_loss`, `detached_mask!` (with its `EnzymeRules.inactive` marker)
+  and the `promote_op`-typed `output_ref` are deleted, the model output
+  returns as the thunk's primal, and the seed is written into the
+  return shadow between forward and reverse. The full cold CPU suite
+  passes with zero reference regeneration. Joint acceptance held with
+  *no* `EnzymeCore.make_zero` piracy anywhere in the test setup:
+  on JLArray, `analyze` end to end is **exact** (dev `0.0`) for
+  `ZeroRule`/`EpsilonRule`/`GammaRule`/`WSquareRule`/`FlatRule` on a
+  `Dense` chain, and `layerwise_relevances` taps are exact too.
+  The Metal re-check on the post-task-1 code also came back exact
+  (dev `0.0`) for the `Dense` chain via plain `analyze`;
+  CNN-on-Metal re-lands with task 4, which adds the pooling fast
+  paths it needs.
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -870,18 +886,16 @@ Ordered by how likely they are to matter:
   tuple-of-shadows handling throughout —
   the principled replacement for tape reuse
   if multi-seed performance ever matters.
-- **Layerwise relevance taps** (`TappedLayer`, `src/autodiff.jl:298-338`)
-  were not tested under split mode on any GPU array
-  (the JLArray attempt died at the `dot` loss, before reaching the taps).
-  `store.val[index.val] = copy(dy)` mutates a Julia `Vector{Any}` from
-  inside a reverse rule; it should be fine
-  (the copy is a device-to-device `copy`) but needs checking —
-  cheap to include in the JLArrays testset.
-- **Rules beyond `ZeroRule` end-to-end.** All `Dense` rule bodies pass
-  in isolation on both backends (dev `0.0` on JLArray),
-  but only `ZeroRule` ran through a complete reverse pass.
-  The JLArrays testset closes this for `Dense`-family models;
-  Metal end-to-end per rule stays manual.
+- ~~Layerwise relevance taps under split mode on a GPU array~~
+  **resolved (2026-08-18, tasks 2+3 acceptance)**: exact on JLArray
+  (`layerwise_relevances` dev `0.0` for every entry);
+  keep the assertion in the JLArrays testset (task 10).
+- **Rules beyond `ZeroRule` end-to-end** — *narrowed* by the tasks 2+3
+  acceptance run: `Epsilon`/`Gamma`/`WSquare`/`Flat` now also pass a
+  complete reverse pass exactly on JLArray. Still open end to end:
+  `ZPlus`/`AlphaBeta`/`ZBox`/`GeneralizedGamma`/`LayerNorm` rules and
+  composites — the JLArrays testset (task 10) closes these for
+  `Dense`-family models; Metal end-to-end per rule stays manual.
 - **`ConvTranspose`, `Scale`, `LayerNorm` end-to-end**: rule bodies and
   fast paths passed in isolation on Metal, no full-model run.
   `Scale`/`LayerNorm` are `Dense`-family and JLArray-coverable;
@@ -904,25 +918,15 @@ Ordered by how likely they are to matter:
    forward-equivalence testset in `test/test_forward.jl`;
    un-canonized `BatchNorm(…, relu)` end-to-end coverage in
    `test/test_lrp.jl`.
-2. Switch the five `make_zero` call sites to `Base.zero`
-   (`src/lrp.jl:217`, `src/autodiff.jl:122,180,216,320`).
-   On CPU this is behavior-neutral (`make_zero`'s fast `Array` method
-   already returns a fresh zeroed array), so the CPU suite is the
-   only immediate gate; the real acceptance is joint with task 3
-   below.
-   File the Metal.jl issue regardless, CUDA's ext as template.
-3. Replace `lrp_loss`/`detached_mask!`/`output_ref` in `call_analyzer`
-   with the split-mode `lrp_split` above (`src/lrp.jl:158-241`).
-   The seed enters as the `Duplicated` return's shadow;
-   no scalar loss (no `Active` return) may remain in the
-   differentiated region — see the activity notes under Change A.
-   Acceptance: the full CPU test suite passes unchanged
-   (bit-identical, no reference regeneration), and — jointly closing
-   task 2 — the JLArray end-to-end probe passes *without* any
-   `EnzymeCore.make_zero` piracy in the test setup
-   (the probes patched it globally; see the caveat under blocker 1).
-   Re-run the Metal end-to-end check here as well: the recorded
-   Metal/JLArray measurements predate task 1's restructuring.
+2. ~~Switch the five `make_zero` call sites to `Base.zero`~~
+   **DONE (2026-08-18)** — four sites in `src/autodiff.jl` plus the
+   fifth, which task 3's rewrite absorbed; `make_zero` is no longer
+   imported. The Metal.jl issue remains to file (task 12).
+3. ~~Replace `lrp_loss`/`detached_mask!`/`output_ref` in
+   `call_analyzer` with the split-mode `lrp_split` above~~
+   **DONE (2026-08-18)** — see the status entry above. CPU suite
+   bit-identical with zero reference regeneration; JLArray and Metal
+   end-to-end exact via plain `analyze`, no piracy in the setup.
 4. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
    (`src/autodiff.jl`, next to the `Conv` methods),
    cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).

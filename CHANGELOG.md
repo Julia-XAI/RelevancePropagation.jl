@@ -53,6 +53,9 @@ Flux.jl models are no longer supported.
 * ![Enhancement][badge-enhancement] The LRP backward pass is implemented as a single Enzyme reverse pass over the model,
   in which per-layer `EnzymeRules` custom rules replace each layer's true VJP with its LRP rule,
   propagating relevances as cotangents.
+  The pass runs in Enzyme's split mode:
+  the output relevance seed is written directly into the model output's shadow,
+  so no scalar loss is differentiated — a prerequisite for GPU-array support.
   Structural backward-pass code for `Chain`, `Parallel` and `SkipConnection` is no longer needed.
   Rules that don't modify parameters or inputs reuse the pre-activations cached during the forward pass,
   and the inner VJPs of `Dense`, `Scale`, `Conv` and `ConvTranspose` use hand-written fast paths.

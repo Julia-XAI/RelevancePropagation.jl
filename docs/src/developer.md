@@ -124,6 +124,11 @@ and every rule is an [`EnzymeRules`](https://enzyme.mit.edu/julia/stable/generat
 custom rule that replaces the layer's VJP.
 Enzyme's input shadow `dx` — what would be the input gradient in plain
 backpropagation — is the explanation.
+The output relevance seed enters as the *return shadow*:
+the pass runs in Enzyme's split mode,
+and the seed is written into the model output's shadow
+between the forward and the reverse pass,
+outside anything Enzyme differentiates.
 
 This design has several consequences:
 - The forward pass, the reverse iteration over layers, and the dataflow

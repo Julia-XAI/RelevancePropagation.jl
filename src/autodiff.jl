@@ -116,7 +116,10 @@ function EnzymeRules.augmented_primal(
     # After the wrap-time activation split, the node's layer never carries an
     # activation function, so its output is the cached pre-activation `zᵏ`.
     z = first(apply(layer.val, x.val, ps.val, st.val))
-    dy = needs_shadow(config) ? make_zero(z) : nothing
+    # Shadows must be freshly zeroed, here and below via `Base.zero`:
+    # `Enzyme.make_zero` has fast methods only for `Base.Array` and aliases
+    # GPU wrapper arrays instead of zeroing them.
+    dy = needs_shadow(config) ? zero(z) : nothing
     # `x` is only copied if Enzyme reports it may be overwritten before the
     # reverse pass; the function itself is index 1 of `overwritten`.
     xᵏ = overwritten(config)[4] ? copy(x.val) : x.val
@@ -174,7 +177,7 @@ function EnzymeRules.augmented_primal(
 ) where {N}
     yvals = map(y -> y.val, ys)
     z = connection.val(yvals...)
-    dz = needs_shadow(config) ? make_zero(z) : nothing
+    dz = needs_shadow(config) ? zero(z) : nothing
     tape = (; ys=map(copy, yvals), z, dz)
     return AugmentedReturn(needs_primal(config) ? z : nothing, dz, tape)
 end
@@ -210,7 +213,7 @@ This is the generic AD fallback of [`input_vjp`](@ref) and the relevance
 propagator for sub-models treated as a single differentiation unit.
 """
 function seeded_pullback(layer, x, ps, st, s)
-    dx = make_zero(x)
+    dx = zero(x)
     autodiff(
         Reverse,
         seeded_apply,
@@ -314,7 +317,7 @@ function EnzymeRules.augmented_primal(
     # The primal is copied instead of passed through: custom rules should not
     # alias their input into their return value.
     y = copy(x.val)
-    dy = needs_shadow(config) ? make_zero(y) : nothing
+    dy = needs_shadow(config) ? zero(y) : nothing
     return AugmentedReturn(needs_primal(config) ? y : nothing, dy, dy)
 end
 

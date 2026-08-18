@@ -111,11 +111,20 @@ the port hand-rolled its own backward-pass engine — `get_activations`,
 structural `lrp!` methods for `Chain`/`Parallel`/`SkipConnection` — and used
 Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
 
-- All Enzyme code is confined to `src/autodiff.jl`. One
-  `Enzyme.autodiff` call per `analyze` differentiates the scalar loss
-  `dot(mask, model(x))` over the *wrapped* model; the input shadow `dx` is
-  the explanation. The mask (output relevance seed) is built by an
-  `EnzymeRules.inactive` function, detaching it from differentiation.
+- The engine lives in `src/autodiff.jl`; the top-level reverse pass in
+  `src/lrp.jl`. One split-mode thunk pair per `analyze`
+  (`autodiff_thunk(ReverseSplitWithPrimal, …)`) differentiates
+  `model_output` over the *wrapped* model: the augmented forward returns
+  the model output together with its shadow, the output relevance seed is
+  written into that shadow between forward and reverse — outside anything
+  Enzyme differentiates — and the input shadow `dx` accumulated by the
+  reverse pass is the explanation (2026-08-18, tasks 2+3 of
+  `PLAN_GPU.md`; previously a combined-mode `autodiff` over the scalar
+  loss `dot(mask, model(x))` with an `EnzymeRules.inactive` mask builder
+  and a `Base.promote_op`-typed output capture — fatal on GPU arrays,
+  where Enzyme cannot differentiate the `dot`). Shadow allocations use
+  `Base.zero`, never `Enzyme.make_zero`, which aliases GPU wrapper
+  arrays instead of zeroing them.
 - **Each rule is an `EnzymeRules` custom rule** on `lrp_node`: the
   augmented forward applies the layer and caches the pre-activation `z` on
   the tape; the reverse calls the pure rule body `propagate` and
