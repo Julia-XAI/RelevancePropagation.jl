@@ -1,21 +1,43 @@
-# Plan: Metal (Apple Silicon) GPU support
+# Plan: GPU support — Metal and JLArrays now, CUDA next
 
 GPU support is in scope for the upcoming "4.0.0" release of RP.jl.
-Since this will be a breaking release anyway, we should make the necessary changes to support GPUs now.
+Since this will be a breaking release anyway,
+we should make the necessary changes to support GPUs now.
 
-Companion to `PLAN_GPU.md`, which covers the discarded Reactant and "stop-gradient" approaches.;
-this document covers the Metal.jl backend and corrects
-two claims in `PLAN_GPU.md` that turned out to be wrong.
-The hope is that Metal compatibility will also result in JLArrays.jl and CUDA.jl compatibility (the latter can't be tested on this machine).
+Companion to `PLAN_GPU.md`,
+which covers the discarded Reactant and "stop-gradient" approaches;
+this document covers generic GPU-array support
+and corrects claims in `PLAN_GPU.md` that turned out to be wrong.
 
-**Status (investigated 2026-08-17):**
-LRP produces correct relevances on Metal after four changes,
-three of them in this package and one upstream in Metal.jl.
-Verified end-to-end on a `Conv`/`MaxPool`/`FlattenLayer`/`Dense` CNN:
-Metal matches the CPU reference to `3.0e-7` relative
-(`2.4e-7` max absolute deviation, Float32).
-Nothing about the engine's design blocks Metal —
-the blockers are a missing upstream extension,
+**Design principle:** every in-package change must be array-type-generic —
+correct for `Array`, `JLArray`, `MtlArray` and (by construction) `CuArray`.
+Backend-specific code (Enzyme integration for a particular backend)
+belongs upstream, not here.
+JLArrays.jl is the enforcement mechanism:
+it runs on standard CI with no GPU hardware,
+so the generic test path can gate every PR.
+CUDA compatibility is *assumed* to follow from this
+(rationale under "Why this should transfer to CUDA")
+and will be tested in follow-up work on real hardware.
+
+**Status:**
+
+- *2026-08-17 (Metal):* LRP produces correct relevances on Metal
+  after four changes, three in this package and one upstream in Metal.jl.
+  Verified end-to-end on a `Conv`/`MaxPool`/`FlattenLayer`/`Dense` CNN:
+  Metal matches the CPU reference to `3.0e-7` relative
+  (`2.4e-7` max absolute deviation, Float32).
+- *2026-08-18 (JLArrays):* the same changes make JLArray work,
+  and nothing less does — the current `dot`-seeded engine fails on JLArray
+  with the same `EnzymeNonScalarReturnException` Metal hit,
+  and split-mode seeding fixes it on both.
+  Split-mode LRP on a `Dense` chain over `JLArray` matches CPU `analyze`
+  **exactly** (max deviation `0.0`; JLArray computes on the CPU,
+  so exact agreement is the expected outcome, and GPU testsets on JLArray
+  can assert near-exact equality rather than a loose `rtol`).
+
+Nothing about the engine's design blocks GPU arrays —
+the blockers are a missing upstream Enzyme extension,
 one design decision in `call_analyzer` (the `dot` seed),
 and three GPU-unfriendly spots in rule code.
 
@@ -28,9 +50,14 @@ GPUArrays v11.5.10, JLArrays v0.3.2.
 CUDA v5.8.2 was read for reference but not run (no NVIDIA hardware).
 
 Reproduction environment: a scratch project that `Pkg.develop`s this package
-and adds `Metal`, `Lux`, `Enzyme`, `EnzymeCore`, `MLDataDevices`, `NNlib`,
-`JLArrays`. Probe scripts are listed under "Reproducers" below.
-Iterate with a DaemonicCabal session (`--session=RelevancePropagation-metal`)
+and adds `Metal` (Metal runs) or `JLArrays` (generic runs),
+plus `Lux`, `Enzyme`, `Functors`, `NNlib`.
+All JLArray probes ran under `JLArrays.allowscalar(false)`
+(scalar indexing is also disallowed by default in non-interactive sessions,
+so CI gets this strictness for free).
+Probe scripts are listed under "Reproducers" below.
+Iterate with a DaemonicCabal session
+(`--session=RelevancePropagation-metal`)
 — Enzyme thunk compilation dominates cold runs
 (a single stage cost ~5–6 min cold, seconds warm).
 Note that a segfault kills the warm worker;
@@ -39,25 +66,30 @@ or restart with `juliaclient --project=$PWD --restart`
 (the `--project` flag is required — a bare `--restart`
 does not target the right worker).
 
-## What already works on Metal
+## What already works
 
-Confirmed by direct measurement, no changes required:
+Confirmed by direct measurement, no changes required.
+"JLArray dev `0.0`" means exact agreement with the CPU result.
 
-- Every Lux forward pass used by the engine.
-- The rule bodies (`propagate`) for `Dense`:
-  `ZeroRule`, `EpsilonRule`, `GammaRule`, `ZPlusRule`,
-  `AlphaBetaRule`, `WSquareRule`, `FlatRule`, `LayerNormRule`.
-- All `input_vjp` fast paths: `Dense` (`Wᵀs`), `Scale`,
-  `Conv` (`∇conv_data`), `ConvTranspose` (`conv`).
-- `stabilize_denom`, `keep_positive`, `keep_negative`, `ones_like`
-  — all broadcast cleanly.
-- `NNlib.∇maxpool` / `NNlib.∇meanpool` (needed for the fast paths below).
-- **`relevance_seed`**, including `seed[idx] .= 1` and `seed[idx] .= y[idx]`
-  with `idx::Vector{CartesianIndex{2}}`.
-  GPUArrays routes this through a kernel, not scalar indexing.
-- Enzyme's *plumbing*: thunk construction, `Chain` recursion,
-  custom-rule dispatch and shadow accumulation all run to completion
-  over `MtlArray`s.
+| component | Metal | JLArray |
+|---|---|---|
+| Lux forward passes used by the engine | ✓ | ✓ `Dense`-family; ✗ conv/pool (NNlib, see below) |
+| `propagate` on `Dense`: `ZeroRule`, `EpsilonRule`, `GammaRule`, `ZPlusRule`, `AlphaBetaRule`, `WSquareRule`, `FlatRule` | ✓ | ✓ dev `0.0` |
+| `propagate` on `Dense`: `LayerNormRule` | ✓ | not measured |
+| `input_vjp` fast paths: `Dense` (`Wᵀs`), `Scale` | ✓ | ✓ |
+| `input_vjp` fast paths: `Conv` (`∇conv_data`), `ConvTranspose` (`conv`) | ✓ | ✗ NNlib scalar-indexes |
+| `NNlib.∇maxpool` / `∇meanpool` (for the fast paths below) | ✓ | ✗ NNlib scalar-indexes |
+| `stabilize_denom`, `keep_positive`, `keep_negative`, `ones_like` | ✓ | ✓ |
+| `relevance_seed`, incl. `seed[idx] .= 1` / `.= y[idx]` with `idx::Vector{CartesianIndex{2}}` | ✓ | ✓ |
+| Enzyme *plumbing*: thunk construction, `Chain` recursion, custom-rule dispatch, shadow accumulation | ✓ | ✓ (via the split-mode run) |
+
+The JLArray ✗ entries are all one fact:
+NNlib's conv and pooling kernels have real GPU implementations
+only for backends with hardware kernels (cuDNN, LuxLib's Metal fallbacks);
+the generic `AbstractArray` fallbacks scalar-index
+and are rejected under `allowscalar(false)`.
+**A JLArrays job therefore covers `Dense`-family models only** —
+CNN paths need Metal (local) or CUDA (follow-up) hardware.
 
 ## The four blockers
 
@@ -67,7 +99,7 @@ The worst of the four: it fails **silently**, returning wrong relevances
 with no error.
 
 ```julia
-y  = MtlArray(Float32[1, 2, 3])
+y  = MtlArray(Float32[1, 2, 3])   # identical for JLArray (measured)
 dy = Enzyme.make_zero(y)
 dy .= 99
 Array(y)   # Float32[99.0, 99.0, 99.0]   <- dy aliases y, and was never zeroed
@@ -77,11 +109,9 @@ Array(y)   # Float32[99.0, 99.0, 99.0]   <- dy aliases y, and was never zeroed
 `AbstractFloat`/`Complex` (`Enzyme/src/typeutils/make_zero.jl:47`).
 Anything else falls through to the generic mutable-struct recursion,
 which rebuilds the wrapper struct while *sharing* the `data::DataRef` field.
-The result is a new `MtlArray` object over the original buffer,
+The result is a new wrapper object over the original buffer,
 still holding the original values.
-
-**This is not Metal-specific:** `JLArray` aliases identically.
-`Base.Array` does not. Plain `Base.zero` is correct on all three.
+Measured aliasing on both `MtlArray` and `JLArray`; `Base.Array` is fine.
 
 CUDA.jl is unaffected because it ships `ext/EnzymeCoreExt.jl`,
 which defines exactly the missing methods (`CUDA/ext/EnzymeCoreExt.jl:561`):
@@ -92,55 +122,92 @@ which defines exactly the missing methods (`CUDA/ext/EnzymeCoreExt.jl:561`):
 ```
 
 plus the `(::Type, seen::IdDict, prev, ::Val)` form and `make_zero!`.
-Metal.jl ships no Enzyme extension at all.
+Metal.jl and JLArrays.jl ship no Enzyme extension at all.
 
 The package calls `make_zero` in five places, all of which are affected:
 `src/lrp.jl:217` (the input shadow `dx`),
-`src/autodiff.jl:123` (`dy` in `lrp_node`'s augmented primal),
+`src/autodiff.jl:122` (`dy` in `lrp_node`'s augmented primal),
 `src/autodiff.jl:180` (`dz` in `lrp_connection`),
 `src/autodiff.jl:216` (`dx` in `seeded_pullback`),
 `src/autodiff.jl:320` (`dy` in `tap_relevance`).
 
-**Fix:** upstream, a `Metal/ext/EnzymeCoreExt.jl` mirroring CUDA's.
-Until that lands, a package extension
-(`RelevancePropagationMetalExt`, weakdeps `Metal` + `EnzymeCore`)
-can define the same three methods; supplying them was sufficient
-to make every result below correct.
-Switching the five call sites to `Base.zero` would also work —
-all five arguments are plain numeric arrays, never nested structures —
-and is backend-agnostic, so it is the better in-package fix
-if we do not want a Metal-specific extension.
+**Fix (decided): switch the five call sites to `Base.zero`.**
+All five arguments are plain numeric arrays, never nested structures,
+so `Base.zero` is semantically identical and backend-agnostic —
+one change fixes Metal, JLArrays and every future backend at once.
+A `RelevancePropagationMetalExt` defining the three `EnzymeCore` methods
+was also verified to work, but is per-backend and does nothing for JLArray;
+reserve that shape for upstream.
+File the Metal.jl issue either way, with the CUDA ext as the template.
 
-### 2. Enzyme cannot differentiate *any* Metal array operation
+Caveat to verify when landing this: the JLArray/Metal probes patched
+`EnzymeCore.make_zero` globally, which also covers any *internal*
+Enzyme call on the differentiated path.
+The split-mode run's return shadow is allocated by this package's own
+`augmented_primal` (call site 2 above), so switching call sites should
+suffice — but re-run the JLArray end-to-end probe *without* the global
+patch as the acceptance check for this task.
 
-Three different failure modes, all from the same root cause:
+### 2. Enzyme cannot differentiate GPU-array operations — on either backend
+
+Metal failure modes (all one root cause):
 
 | expression | result |
 |---|---|
 | `autodiff(Reverse, x -> sum(abs2, x), Active, Duplicated(::MtlArray, …))` | **segfault** in LLVM's verifier inside `EnzymeCreateAugmentedPrimal` |
 | `autodiff(Reverse, dot, Active, Duplicated(::MtlArray, …), Const(::MtlArray))` | `EnzymeNonScalarReturnException: … found nothing of type Nothing` |
-| `autodiff_thunk(…)` over `x -> 2 .* x` | `LLVM error: … Enzyme: Number of arg operands != function parameters` on a call to `objc_msgSend` |
+| `autodiff_thunk(…)` over `x -> 2 .* x` | `LLVM error: … Number of arg operands != function parameters` on a call to `objc_msgSend` |
 
-The third message names the cause: Metal.jl's array operations bottom out
-in Objective-C message sends to the Metal API (buffer allocation,
-command encoding, kernel dispatch), and Enzyme — differentiating at the
-LLVM IR level — cannot rewrite `objc_msgSend`.
-`set_runtime_activity` does not help (verified for `dot` and
-`seeded_apply`; the `sum(abs2, ·)` segfault was not retried with it).
-CUDA.jl's 773-line `EnzymeCoreExt` exists precisely to give Enzyme
-rules for the equivalent CUDA constructs (`cufunction`, `cudaconvert`,
-kernel launch); Metal has no counterpart.
+The third message names the Metal-specific cause: Metal.jl's array
+operations bottom out in Objective-C message sends to the Metal API,
+and Enzyme — differentiating at the LLVM IR level —
+cannot rewrite `objc_msgSend`.
+`set_runtime_activity` does not help.
 
-Consequences for the engine:
+JLArray reproduces the *structure* of the blocker
+with different error messages (measured 2026-08-18):
+
+| expression | result |
+|---|---|
+| `autodiff(Reverse, dot, Active, Duplicated(::JLArray, …), Const(::JLArray))` | works, correct gradient |
+| `autodiff(Reverse, x -> sum(abs2, x), …)` | `LLVM error: function failed verification` |
+| seeded `x -> 2 .* x` | `MethodError: no method matching mkcontext(::KernelAbstractions.Kernel{JLBackend, …})` — Enzyme's KernelAbstractions integration does not know `JLBackend` |
+| `seeded_pullback` on `Dense`+`relu` | `EnzymeRuntimeActivityError` |
+| the current engine, end to end (`make_zero` fixed, any rule set) | `EnzymeNonScalarReturnException`, same as Metal's `dot` case |
+
+So standalone `dot` differentiates on JLArray,
+but embedded in `lrp_loss` (behind `apply` and the inactive mask) it fails;
+the exact trigger was not isolated because split mode removes the question.
+
+On the `EnzymeRuntimeActivityError`s: this is the documented
+"constant memory is stored (or returned) to a differentiable variable"
+condition, with two documented mitigations —
+rewrite the code to be activity-stable,
+or opt into `set_runtime_activity(Reverse)`.
+Neither is worth pursuing for `seeded_pullback` on GPU arrays:
+on Metal `set_runtime_activity` was tried and the `objc_msgSend`
+failure remains behind it, on JLArray the missing `JLBackend`
+KernelAbstractions support sits behind it (untried),
+and the fast paths of Change B remove the call from GPU paths entirely.
+
+The conclusion is the same on both backends and is the design constraint:
+
+**The engine's differentiable surface must be empty on GPU arrays.**
+
+Consequences:
 
 - **The top-level scalar loss is fatal.** `lrp_loss` (`src/lrp.jl:161`)
   ends in `dot(mask, y)`, and that `dot` is the one array operation
-  Enzyme must differentiate itself. It cannot, on Metal.
+  Enzyme must differentiate itself. Dead on Metal, dead on JLArray.
 - **`seeded_pullback` is fatal.** It differentiates
   `dot(first(apply(layer, x, ps, st)), s)` (`src/autodiff.jl:230`),
-  so any layer without an `input_vjp` fast path is unusable on Metal.
-  Measured: `MaxPool`, `MeanPool` and `BatchNorm` all fail this way
-  (`EnzymeRuntimeActivityError`, then the `dot` failure above).
+  so any layer without an `input_vjp` fast path is unusable on GPU arrays.
+  Measured on Metal: `MaxPool`, `MeanPool` and `BatchNorm` all fail this way.
+  CUDA is the one backend where `seeded_pullback` *may* work
+  (its 773-line `EnzymeCoreExt` gives Enzyme rules for `cufunction`,
+  `cudaconvert`, kernel launches) — but the design should not rely on it:
+  treat "layer without a fast path" as CPU-only,
+  and let CUDA support arrive as a bonus, not a requirement.
 
 Everything else is already covered by the custom rules,
 which Enzyme never differentiates — it only *calls* them.
@@ -151,10 +218,10 @@ its differentiable surface is almost empty by construction.
 
 `src/utils.jl:66-74` loops over `CartesianIndices(A)` with scalar
 `getindex`/`setindex!`, which `GPUArraysCore` rejects
-("Scalar indexing is disallowed").
-Only `GeneralizedGammaRule` uses it.
+("Scalar indexing is disallowed") — measured on both Metal and JLArray
+(on JLArray via `GeneralizedGammaRule`, the only user).
 
-**Fix (verified, bit-identical to the loop on CPU):**
+**Fix (verified on both; bit-identical to the loop on CPU):**
 
 ```julia
 masked_copy(A::AbstractArray, mask::AbstractArray) =
@@ -167,22 +234,41 @@ The size check should be kept.
 
 `src/rules.jl:374` builds the `low`/`high` bound arrays with
 `fill(convert(T, c), size(in))`, which returns a `Matrix{Float32}`
-even when `in` is an `MtlArray`. `ZBoxRule` then fails with
-`ArgumentError: Objects are on devices with different types:
-MetalDevice and CPUDevice`.
+even when `in` is a GPU array.
 The `AbstractArray` method (`src/rules.jl:375`) has the same problem:
 `convert.(T, A)` keeps `A` on whatever device it was already on.
 
-**Fix:** allocate through the input,
-`fill!(similar(in), convert(T, c))`, and for the array method
-copy onto the input's device rather than converting in place.
+Failure mode differs by backend, but both fail loudly (measured):
+
+- Metal: `ArgumentError: Objects are on devices with different types:
+  MetalDevice and CPUDevice` from Lux's device check.
+- JLArray: `Illegal conversion of a JLArray to a Ptr`
+  when the generic matmul meets the host-side bound array.
+  (Plain host-`Matrix` ⊙ `JLArray` *broadcasts* silently fine —
+  it is the matmul in `apply` that objects.
+  So JLArrays does catch this bug, just later in the pipeline.)
+
+**Fix (generic):** allocate through the input —
+
+```julia
+zbox_input(in::AbstractArray{T}, c::Real) where {T} =
+    fill!(similar(in), convert(T, c))
+function zbox_input(in::AbstractArray{T}, A::AbstractArray) where {T}
+    @assert size(A) == size(in)
+    return copyto!(similar(in, T), A)
+end
+```
+
+`similar` inherits the device, `copyto!` is the canonical host→device
+upload, and both lines stay correct for plain `Array`.
 
 ## Performance-only issue: `FlatRule` on `Dense`
 
 `src/rules.jl:613-620` fills one view per batch sample and calls
 `sum(view(Rᵏ⁺¹, :, i))`, which returns a host scalar —
 one GPU→CPU synchronisation per sample.
-It *works* on Metal, it is just slow.
+It *works* on Metal, and on JLArray it runs under `allowscalar(false)`
+with dev `0.0` — so this is confirmed performance-only, on both.
 
 **Fix (verified, matches the loop form on CPU):**
 
@@ -197,7 +283,7 @@ This is worth doing regardless of GPU support.
 
 ## The verified path
 
-Two changes turn the failures above into correct Metal results.
+Two changes turn the failures above into correct GPU results.
 Both were measured; the numbers are from the runs described here.
 
 ### Change A: replace the `dot` seed with split-mode seeding
@@ -208,7 +294,7 @@ the returned output shadow, and run the reverse:
 
 ```julia
 function lrp_split(model, x, ps, st, seed)
-    dx = make_zero(x)
+    dx = zero(x)
     fwd, rev = Enzyme.autodiff_thunk(
         ReverseSplitWithPrimal, Const{typeof(model_output)}, Duplicated,
         Const{typeof(model)}, Duplicated{typeof(x)},
@@ -222,6 +308,53 @@ function lrp_split(model, x, ps, st, seed)
     return dx, primal
 end
 ```
+
+(The seed can be built from `primal` between `fwd` and `rev`,
+since the primal output is available before the reverse runs —
+that is how the probes computed `relevance_seed(primal, ns(primal), …)`.)
+
+The annotations follow Enzyme's activity system
+(FAQ ["Implementing pullbacks"](https://enzymead.github.io/Enzyme.jl/stable/faq/#Implementing-pullbacks),
+[API reference](https://enzymead.github.io/Enzyme.jl/stable/api/)
+for `autodiff_thunk`), and split mode is the *documented* shape
+for array-valued pullbacks, not a workaround:
+
+- **`Active` return is not an option for arrays.**
+  `Active` is reserved for immutable values;
+  combined-mode reverse `autodiff` therefore only differentiates
+  functions returning a `Real` or `nothing`.
+  The current `dot(mask, y)` loss exists purely to manufacture
+  such a scalar — and that manufactured scalar is exactly the
+  operation Enzyme cannot differentiate on GPU arrays.
+  For thunks the API reference enumerates the return activity as
+  "`Const` or `Duplicated` (or its variants `DuplicatedNoNeed`,
+  `BatchDuplicated`, and `BatchDuplicatedNoNeed`)" —
+  an array-returning `model_output` is `Duplicated`,
+  and the seed enters as its shadow, with no loss function at all.
+- **`ReverseSplitWithPrimal` + `Duplicated`** because both outputs
+  are needed: `primal` becomes `Explanation.output`
+  (and feeds `relevance_seed`), `shadow` receives the seed.
+  The `NoPrimal`/`NoNeed` variants exist to skip the primal
+  computation and do not apply here.
+- **Shadows are accumulators.** Enzyme *adds* into shadow memory
+  (per the FAQ, results are "added to" the shadow),
+  so `dx` must be freshly zero-initialized on every call —
+  which is also why blocker 1's aliasing `make_zero` is so poisonous:
+  it violates exactly this zero-on-entry contract, silently.
+- **The reverse thunk returns derivatives only for `Active`
+  arguments**, of which there are none here: `model`, `ps`, `st`
+  are `Const`, and the input relevance accumulates in place into
+  `Duplicated`'s `dx`, so `rev`'s return value is ignored.
+- **Why not the FAQ's mutating-accumulator pattern?**
+  The documented combined-mode alternative for array outputs
+  (a mutating `f!(y, x…)` returning `nothing`,
+  with the seed passed up front as `Duplicated(y, seed)`)
+  would also eliminate the scalar loss,
+  but it moves a `copyto!`-style store *into* the differentiated
+  region — on Metal that is again a device operation Enzyme would
+  have to rewrite. The split thunk writes the seed into the shadow
+  *between* the forward and reverse passes,
+  outside anything Enzyme differentiates. (Reasoned, not measured.)
 
 This removes the last array operation Enzyme had to differentiate,
 and it is a strict improvement independent of GPU support:
@@ -269,40 +402,84 @@ end
 Cross-checked against `seeded_pullback` on CPU: **exactly equal**
 (max deviation `0.0`) for both layer types.
 These belong in the existing `test_autodiff.jl` fast-path testset.
+On JLArray these paths cannot run at all
+(NNlib pooling scalar-indexes there), which is fine:
+the cross-check lives on CPU, the device test on Metal/CUDA.
 
-### Measured result
+### Measured results
 
-With Change A, Change B, the `make_zero` methods from blocker 1,
+With Change A, Change B, the `make_zero` fix from blocker 1,
 and no other modifications:
 
-| model | Metal vs CPU |
+| model / backend | vs CPU `analyze` |
 |---|---|
-| `Chain(Dense(4=>6, relu), Dense(6=>3))`, `ZeroRule` | max abs dev `6.0e-8` |
-| `Chain(Conv((3,3),1=>4,relu;pad=1), MaxPool((2,2)), FlattenLayer(), Dense(64=>3))`, `ZeroRule` | max abs dev `2.4e-7`, relative `3.0e-7` |
+| `Dense` chain, `ZeroRule`, Metal | max abs dev `6.0e-8` |
+| `Conv`/`MaxPool`/`FlattenLayer`/`Dense` CNN, `ZeroRule`, Metal | max abs dev `2.4e-7`, relative `3.0e-7` |
+| `Dense` chain, `ZeroRule`, JLArray | max abs dev `0.0` (exact) |
+| CPU, split mode vs current engine | bit-identical (`==`) |
 
-Both are Float32 rounding noise.
-The CPU split-mode result is *bit-identical* to today's `analyze`.
+The Metal deviations are Float32 rounding noise.
+
+## What a JLArrays CI job buys
+
+With the tasks below landed, a `test_gpu.jl` running on JLArrays in
+ordinary GitHub CI covers, with no GPU hardware:
+
+- the full engine end to end (`analyze` with each rule)
+  on `Dense`-family models, with (near-)exact CPU agreement —
+  this is what catches any future `make_zero`-style silent aliasing;
+- every `Dense`-compatible rule body (`propagate`) against CPU;
+- the `Dense`/`Scale` `input_vjp` fast paths;
+- indexed seed writes and CRP's concept masking;
+- scalar-indexing regressions (this is how `masked_copy` and
+  `GeneralizedGammaRule` fail today) —
+  `allowscalar(false)` is the default in non-interactive sessions;
+- host-array leaks like `zbox_input`
+  (fails loudly in the generic matmul, measured).
+
+What it structurally cannot cover:
+
+- **conv, pooling, and anything NNlib**: no JLArray kernels exist,
+  the generic fallbacks scalar-index. CNN coverage needs Metal or CUDA.
+- **real Enzyme↔backend integration** (CUDA's `EnzymeCoreExt`,
+  a future Metal equivalent): JLArray's failure modes mimic the
+  *shape* of Metal's but not its mechanisms.
+- **performance**: JLArray is a semantics simulator, not a speed one.
+
+### Why this should transfer to CUDA
+
+Everything in the task list is broadcast, `similar`, `copyto!`,
+NNlib entry points with cuDNN implementations, or generic Enzyme API —
+no Metal- or JLArray-specific code remains in the package.
+On the CUDA side, the three risk points are each already covered upstream:
+`make_zero` (CUDA's `EnzymeCoreExt` ships the correct methods, and after
+task 1 we no longer call it anyway), conv/pooling (cuDNN via NNlibCUDA),
+and Enzyme plumbing over device arrays (the same `EnzymeCoreExt`,
+the most mature Enzyme-GPU integration there is).
+Remaining risk is untested-in-anger thunk plumbing over `CuArray`
+inside our custom rules — the follow-up hardware test exists to catch
+exactly that, not to drive design changes.
 
 ## Corrections to `PLAN_GPU.md`
 
-Two items in the "Known GPU-unfriendly spots" section are wrong,
-and one testing recommendation needs a caveat:
+Items in the "Known GPU-unfriendly spots" section that are wrong,
+and one testing recommendation that changed:
 
 - **`relevance_seed` is not a blocker.**
-  `seed[idx] .= 1` with `idx::Vector{CartesianIndex{2}}` works on Metal;
-  GPUArrays handles it without scalar indexing.
+  `seed[idx] .= 1` with `idx::Vector{CartesianIndex{2}}` works on
+  Metal and JLArray; GPUArrays handles it without scalar indexing.
   The same applies to CRP's concept masking
   (`R_masked[idx] .= R_original[idx]`, `src/crp.jl:100`) —
   verified working with CPU-derived indices.
 - **The `FlatRule`/`Dense` fast path is a performance issue, not a
-  correctness one** — it runs on Metal, one host sync per batch sample.
-- **JLArrays is not a safe stand-in for GPU CI.**
-  `Enzyme.make_zero` aliases `JLArray` exactly as it does `MtlArray`,
-  so a JLArrays job would reproduce blocker 1 —
-  which is useful — but it would do so for *every* Enzyme-based test,
-  masking anything else. Either add the `make_zero` methods for
-  `JLArray` in the test setup, or treat a JLArrays job as a
-  scalar-indexing/device-mismatch check only.
+  correctness one** — it runs on both backends (JLArray dev `0.0`).
+- **JLArrays is a real CI target, not just a smoke test** —
+  *after* task 1. The earlier caveat
+  ("`make_zero` aliases `JLArray`, masking everything else")
+  is resolved by switching the package to `Base.zero`;
+  with that plus Change A, the whole `Dense`-family engine
+  runs on JLArray exactly. The remaining limitation is NNlib
+  (no conv/pooling), covered under "What a JLArrays CI job buys".
 
 The unlisted spots this investigation found are `masked_copy`
 and `zbox_input`, both above.
@@ -312,104 +489,158 @@ and `zbox_input`, both above.
 Ordered by how likely they are to matter:
 
 - **`BatchNorm` has no `input_vjp` fast path**, so it takes
-  `seeded_pullback` and is dead on Metal. `canonize` fuses BatchNorm into
-  the preceding linear layer, which sidesteps it for canonized models,
-  but an un-canonized model with BatchNorm will fail.
-  A fast path is straightforward (testmode BatchNorm is an affine map).
+  `seeded_pullback` and is dead on GPU arrays. `canonize` fuses BatchNorm
+  into the preceding linear layer, which sidesteps it for canonized
+  models, but an un-canonized model with BatchNorm will fail.
+  A fast path is straightforward (testmode BatchNorm is an affine map,
+  the VJP a channel-wise broadcast — generic, and likely testable
+  end to end on JLArray, though LuxLib's batchnorm on JLArray
+  was not measured).
 - **CRP is blocked upstream in XAIBase**, not here:
-  `TopNFeatures(2)(::MtlArray)` fails with scalar indexing
-  (its `top_n` sort). The rest of CRP's positional loop is GPU-clean —
+  `TopNFeatures(2)` scalar-indexes in its `top_n` sort —
+  measured failing on both `MtlArray` and `JLArray`,
+  so the fix is generically testable in CI without GPU hardware.
+  The rest of CRP's positional loop is GPU-clean —
   it drives `propagate` directly and never touches the Enzyme
   end-to-end pass, so once feature selection is fixed
   (or run on a host copy of the relevance) CRP should work.
+- **Batched seeds via `BatchDuplicated` (future, out of 4.0 scope).**
+  Multi-seed use cases (several output selections per input,
+  CRP-style repeated passes) currently mean one reverse pass per seed,
+  and `NOTES.md` records that *reusing* a consumed split-mode tape
+  for several seeds aborts Julia.
+  Enzyme's documented mechanism for exactly this is width-N shadows:
+  `BatchDuplicated` arguments and return compute N pullbacks
+  in a single pass, no tape reuse involved.
+  It is out of scope because the custom rules dispatch on
+  `::Type{<:Union{Duplicated,DuplicatedNoNeed}}` and `x::Duplicated`
+  (`src/autodiff.jl:111-148`, likewise `lrp_connection` and
+  `tap_relevance`), so batch mode would need `BatchDuplicated`
+  methods with tuple-of-shadows handling throughout —
+  but it is the principled replacement for tape reuse
+  if multi-seed performance ever matters.
 - **Layerwise relevance taps** (`TappedLayer`, `src/autodiff.jl:298-338`)
-  were not tested on Metal. `store.val[index.val] = copy(dy)` mutates a
-  Julia `Vector{Any}` from inside a reverse rule; it should be fine
-  (the copy is a device-to-device `copy`) but needs checking.
-- **`ConvTranspose`, `Scale`, `LayerNorm` end-to-end**: the rule bodies
-  and fast paths were exercised in isolation on Metal and passed,
-  but no full-model test was run.
-- **Rules beyond `ZeroRule` end-to-end on Metal.** All rule bodies were
-  exercised on Metal for a single `Dense` layer, but only `ZeroRule` ran
-  through a complete reverse pass.
+  were not tested under split mode on any GPU array
+  (the JLArray attempt died at the `dot` loss, before reaching the taps).
+  `store.val[index.val] = copy(dy)` mutates a Julia `Vector{Any}` from
+  inside a reverse rule; it should be fine
+  (the copy is a device-to-device `copy`) but needs checking —
+  cheap to include in the JLArrays testset.
+- **Rules beyond `ZeroRule` end-to-end.** All `Dense` rule bodies pass
+  in isolation on both backends (dev `0.0` on JLArray),
+  but only `ZeroRule` ran through a complete reverse pass.
+  The JLArrays testset closes this for `Dense`-family models;
+  Metal end-to-end per rule stays manual.
+- **`ConvTranspose`, `Scale`, `LayerNorm` end-to-end**: rule bodies and
+  fast paths passed in isolation on Metal, no full-model run.
+  `Scale`/`LayerNorm` are `Dense`-family and JLArray-coverable;
+  `ConvTranspose` needs hardware.
 - **Performance.** Nothing was benchmarked. LuxLib already warns
   `Falling back to slow convolution routine for MetalDevice`
   on the CNN above, so Metal throughput in the Lux stack is immature
   independently of anything here.
-- **Float64.** Apple GPUs are Float32-only. Model checks or docs should
-  say so; the package has no eltype restriction today.
+- **Float64.** Apple GPUs are Float32-only; CUDA and JLArray are not.
+  Treat eltype as a backend property, not a package restriction —
+  docs should note the Metal limitation, nothing more.
 
 ## Task list
 
 1. Switch the five `make_zero` call sites to `Base.zero`
-   (`src/lrp.jl:217`, `src/autodiff.jl:123,180,216,320`),
-   **or** add a `RelevancePropagationMetalExt` with the three
-   `EnzymeCore.make_zero`/`make_zero!` methods.
-   Prefer the former: it is backend-agnostic and fixes JLArrays too.
-   File the Metal.jl issue either way, with the CUDA ext as the template.
+   (`src/lrp.jl:217`, `src/autodiff.jl:122,180,216,320`).
+   Acceptance: JLArray end-to-end run passes *without* any
+   `EnzymeCore.make_zero` piracy in the test setup
+   (the probes patched it globally; see the caveat under blocker 1).
+   File the Metal.jl issue regardless, CUDA's ext as template.
 2. Replace `lrp_loss`/`detached_mask!`/`output_ref` in `call_analyzer`
    with the split-mode `lrp_split` above (`src/lrp.jl:158-241`).
-   Acceptance: the full test suite passes unchanged —
+   The seed enters as the `Duplicated` return's shadow;
+   no scalar loss (no `Active` return) may remain in the
+   differentiated region — see the activity notes under Change A.
+   Acceptance: the full CPU test suite passes unchanged —
    the CPU result is bit-identical, so no references need regenerating.
 3. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
    (`src/autodiff.jl`, next to the `Conv` methods),
-   cross-checked against `seeded_pullback` in `test_autodiff.jl`.
-4. Broadcast `masked_copy` (`src/utils.jl:66`).
-5. Fix `zbox_input` to allocate on the input's device (`src/rules.jl:374-378`).
+   cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
+4. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
+5. Make `zbox_input` allocate through the input
+   (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`).
 6. Broadcast the `FlatRule`/`Dense` fast path (`src/rules.jl:613`).
-7. Add a `BatchNorm` `input_vjp` fast path.
-8. Add a GPU testset. Given the JLArrays caveat above, the honest
-   options are a Metal job on self-hosted Apple hardware, or a Buildkite
-   CUDA pipeline. Cover, per backend: `input_vjp` per supported layer
-   type, one end-to-end `analyze` per composite preset, and a
-   CPU-vs-GPU agreement test at `rtol=1e-5` (Float32).
-9. Report blocker 1 to Metal.jl and blocker 2 to Enzyme.jl/Metal.jl.
-   Blocker 2 is the large one and is not on this package's critical path
-   after task 2 and 3 — but it does mean *any* future feature that
-   needs Enzyme to differentiate a real array operation
-   will be CPU/CUDA-only.
+7. Add a `BatchNorm` `input_vjp` fast path
+   (testmode affine map; generic broadcast).
+8. Add `test/test_gpu.jl`, parameterized over the device like
+   ExplainableAI.jl's (`device = Metal.functional() ? mtl : jl`,
+   with `fmap`/`Adapt` for the `ps`/`st` trees).
+   The JLArrays leg runs in standard CI on every PR and asserts
+   near-exact CPU agreement for: `analyze` end to end per rule on a
+   `Dense`-family model (incl. `layerwise_relevances` and a composite),
+   `propagate` per `Dense`-compatible rule, `Dense`/`Scale`/`BatchNorm`
+   fast paths, and CRP once XAIBase is fixed.
+   Conv/pool testsets are gated on a functional hardware backend
+   (Metal locally / self-hosted; CUDA via Buildkite in follow-up)
+   and compare at `rtol=1e-5` (Float32).
+9. Follow-up (separate machine): run the same testset on CUDA,
+   which by the argument above should require zero package changes.
+10. Upstream reports:
+    Metal.jl — `make_zero` aliasing, `EnzymeCoreExt` request (blocker 1);
+    Enzyme.jl — `objc_msgSend` on Metal, no `mkcontext` for
+    KernelAbstractions' `JLBackend` (blocker 2);
+    XAIBase.jl — `TopNFeatures` scalar indexing (CRP item above).
+    Blocker 2 is the large one and is not on this package's critical
+    path after tasks 2 and 3 — but it does mean any future feature
+    that needs Enzyme to differentiate a real array operation
+    will be CPU/CUDA-only.
 
-Tasks 1–6 are self-contained and independently testable.
-Tasks 2 and 3 are the ones that make Metal work;
-tasks 1, 4, 5, 6 are correctness/performance fixes that
-apply to CUDA equally.
+Tasks 1–7 are self-contained, independently testable, and generic
+(no backend appears in `src/`).
+Tasks 1 and 2 are the ones that make GPU arrays work at all;
+task 3 extends that from `Dense`-family models to CNNs on hardware
+backends; tasks 4–7 are correctness/performance fixes that
+apply to every backend equally.
 
 ## Relationship to `PLAN_GPU.md`
 
 This changes the ranking of the options in `PLAN_GPU.md`:
 
-- **Metal via raw Enzyme (this document)** is the cheapest path to
-  *any* GPU support and is verified working. Six small changes,
-  no second implementation of any rule, no semantic differences.
-- **CUDA via raw Enzyme (future work)** (`PLAN_GPU.md` approach 2) benefits from
-  every task above and additionally has real Enzyme integration
-  (CUDA.jl's `EnzymeCoreExt`), so `seeded_pullback` should keep working
-  there. It remains untested for lack of hardware.
-  The hope behind this plan is that generic support for Metal.jl also results in CUDA.jl compatibility (this will be tested in follow-up work). 
-- **Reactant via stop-gradient surrogates (DISCARDED)** (`PLAN_GPU.md` approach 1,
-  item 2) stays the most expensive option: a parallel implementation of
-  every rule, in a formalism with no documented extension point for
-  user-defined rules, carrying known semantic gaps for the
-  modified-input rules. The work here does not depend on it and is not
-  made redundant by it.
-  This approach has been discarded in favor of more generic GPU support (starting with Metal.jl and JLArrays.jl in this plan)
+- **Generic GPU-array support via raw Enzyme (this document)** is the
+  cheapest path to *any* GPU support and is verified working on Metal
+  and JLArray. A handful of small generic changes,
+  no second implementation of any rule, no semantic differences,
+  and a hardware-free CI story via JLArrays.
+- **CUDA via raw Enzyme (follow-up)** (`PLAN_GPU.md` approach 2)
+  benefits from every task above and additionally has real Enzyme
+  integration (CUDA.jl's `EnzymeCoreExt`), so `seeded_pullback` may even
+  keep working there. Untested for lack of hardware; expected to be a
+  test-only follow-up, not a development effort.
+- **Reactant via stop-gradient surrogates (DISCARDED)** (`PLAN_GPU.md`
+  approach 1, item 2) stays the most expensive option: a parallel
+  implementation of every rule, in a formalism with no documented
+  extension point for user-defined rules, carrying known semantic gaps
+  for the modified-input rules. Discarded in favor of the generic
+  support in this plan; the work here neither depends on it
+  nor is made redundant by it.
 
 ## Reproducers
 
 Metal v1.10.0 was not the newest release at the time of the check;
 re-confirm blockers 1 and 2 against current Metal.jl before filing.
 
-The scripts used live in the (session-scoped, so possibly already
-collected) scratchpad directory
-`…/7a11372f-5358-421d-82db-72332841e696/scratchpad/metalenv/`.
-The two that matter are reproduced inline above;
-if this work proceeds they should be rewritten into
-`test/test_gpu.jl` rather than restored verbatim:
+The Metal scripts lived in a session-scoped scratchpad that is likely
+already collected (`…/7a11372f-…/scratchpad/metalenv/`);
+the two that matter are reproduced inline above.
+The JLArray probes (2026-08-18) live in
+`…/e6a573d2-…/scratchpad/jlenv/` (same caveat) and should be folded
+into `test/test_gpu.jl` rather than restored verbatim:
 
-- `makezero.jl` — blocker 1, three lines, no dependency on this package.
-  Compares `Array` / `MtlArray` / `JLArray`.
-- `minimal.jl` — blocker 2, the three Enzyme failure modes.
-- `probe.jl` / `probe3.jl` — per-function survey of rule bodies,
-  `input_vjp` fast paths and the proposed broadcast fixes.
-- `warm.jl` + `fix.jl` + `cnn.jl` + `pool.jl` — the split-mode
-  seeding path and the end-to-end CPU/Metal comparisons quoted above.
+- `probe1.jl` — no Enzyme: scalar-indexing defaults, `make_zero`
+  aliasing on JLArray, host⊙device broadcast, `masked_copy` loop vs
+  broadcast, seed writes, NNlib conv/pooling, `Wᵀs`, `dot`.
+- `probe2.jl` — Enzyme micro-probes on JLArray: `dot` (works),
+  `sum(abs2, ·)`, broadcast, `seeded_pullback` (all fail; messages
+  quoted under blocker 2). Patches `EnzymeCore.make_zero` for JLArray
+  to emulate task 1.
+- `probe3.jl` — the current `dot`-seeded engine end to end on JLArray:
+  fails for every rule set (`EnzymeNonScalarReturnException`);
+  also `TopNFeatures` scalar indexing.
+- `probe4.jl` — `propagate` per rule on JLArray vs CPU (dev `0.0`,
+  plus the `ZBoxRule`/`GeneralizedGammaRule` failures),
+  and split-mode `lrp_split` on JLArray: dev `0.0` vs CPU `analyze`.
