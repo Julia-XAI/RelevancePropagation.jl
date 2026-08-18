@@ -1,6 +1,7 @@
 # Plan: GPU support
 
-GPU support is out of scope for v4.0.0 and tracked here as follow-up work.
+GPU support is in scope for the upcoming "4.0.0" release of RP.jl.
+Since this will be a breaking release anyway, we should make the necessary changes to support GPUs now.
 
 Enzyme itself supports GPUs (it differentiates CUDA kernels, and the Lux
 ecosystem's recommended path for Enzyme on GPU is
