@@ -1,4 +1,5 @@
-using RelevancePropagation: input_vjp, seeded_pullback, remove_activation, PoolingLayer
+using RelevancePropagation:
+    input_vjp, prepare_vjp, seeded_pullback, remove_activation, PoolingLayer
 using Test
 
 using Lux
@@ -61,6 +62,26 @@ setup_testmode(layer) = (l=Lux.setup(StableRNG(123), layer); (l[1], Lux.testmode
             s = randn(StableRNG(17), Float32, size(z_ref)...)
             dx_ref = only(back_ref(s))
             @test seeded_pullback(layer, x, ps, st, s) ≈ dx_ref
+        end
+    end
+end
+
+# `prepare_vjp` is the two-phase primitive the rule bodies consume: both the
+# primal it returns (the rule's z̃) and its single-use pullback must agree
+# with the plain forward pass and Zygote — on the fast paths and on the
+# split-mode Enzyme fallback (the layers with activations) alike.
+@testset "prepare_vjp vs Zygote" begin
+    for (name, layer, x) in LAYERS
+        @testset "$name" begin
+            ps, st = setup_testmode(layer)
+            z_ref, back_ref = Zygote.pullback(
+                x -> first(LuxCore.apply(layer, x, ps, st)), x
+            )
+            s = randn(StableRNG(17), Float32, size(z_ref)...)
+            dx_ref = only(back_ref(s))
+            z̃, pullback = prepare_vjp(layer, x, ps, st)
+            @test z̃ ≈ z_ref
+            @test pullback(s) ≈ dx_ref
         end
     end
 end

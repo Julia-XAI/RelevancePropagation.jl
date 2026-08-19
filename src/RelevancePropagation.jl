@@ -12,13 +12,12 @@ using Lux: NoOpLayer, WrappedFunction
 using LuxCore: LuxCore, apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
 using LuxCore: AbstractLuxWrapperLayer
 
-using Enzyme: autodiff, autodiff_thunk, Reverse, ReverseSplitWithPrimal, Active
+using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
 using Enzyme: Const, Duplicated, DuplicatedNoNeed
 using Enzyme.EnzymeRules: EnzymeRules, RevConfig, AugmentedReturn
 using Enzyme.EnzymeRules: needs_primal, needs_shadow, overwritten
 
 using Functors: KeyPath
-using LinearAlgebra: dot
 using NNlib: relu, gelu, swish, mish
 using NNlib: conv, ∇conv_data, DenseConvDims
 using NNlib: maxpool, ∇maxpool, meanpool, ∇meanpool

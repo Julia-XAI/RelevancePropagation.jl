@@ -174,15 +174,6 @@ end
 # Call to the LRP analyzer #
 #==========================#
 
-# The function the Enzyme reverse pass differentiates.
-# Its return value is array-valued (`Duplicated`),
-# so the relevance seed enters as the return shadow in split mode —
-# no scalar loss is manufactured,
-# and the differentiated region contains no array operation
-# outside the custom rules (a GPU-compatibility requirement:
-# Enzyme cannot differentiate GPU-array operations).
-model_output(model, x, ps, st) = first(apply(model, x, ps, st))
-
 function relevance_seed(y, idx, normalize::Bool)
     seed = zero(y)
     if normalize

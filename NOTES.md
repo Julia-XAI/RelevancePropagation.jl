@@ -146,17 +146,25 @@ Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
   relevances", and a tiny vararg custom rule on the wrapped `connection` of
   `Parallel`/`SkipConnection` implements the proportional relevance split
   from the tape, with no re-forwarding of branches.
-- **Inner VJPs**: rules pull seeds back through (modified) layers via
-  `input_vjp`. Activation-free `Dense`/`Scale`/`Conv`/`ConvTranspose` use
-  hand-written fast paths (`Wᵀs`, broadcast, `∇conv_data`, `conv`) —
-  cross-checked against the AD fallback in `test_autodiff.jl`; everything
-  else uses `seeded_pullback`, one *combined-mode* nested `autodiff` over
-  `dot(layer(x), s)`. Combined mode re-runs the layer forward, but split
-  thunks (single-use tapes, see git history: re-running a consumed tape
-  aborts Julia for some layers) and their two-phase bookkeeping are gone;
-  multi-seed rules (`AlphaBetaRule`, `GeneralizedGammaRule`) just call
-  `input_vjp` once per seed, which with fast paths is FLOP-optimal
-  (4 forwards + 4 transposes for αβ).
+- **Inner VJPs**: rules pull seeds back through (modified) layers via the
+  two-phase `prepare_vjp(layer, x, ps, st) -> (z̃, pullback)` when they
+  also need the forward pass, and via one-shot `input_vjp` when the
+  primal is already at hand (cached `zᵏ`, or a second seed at the same
+  point). Activation-free `Dense`/`Scale`/`Conv`/`ConvTranspose` and
+  pooling layers use hand-written fast paths (`Wᵀs`, broadcast,
+  `∇conv_data`, `conv`, NNlib's pooling gradients) — cross-checked
+  against the AD fallback in `test_autodiff.jl`; everything else runs a
+  nested *split-mode* thunk (`thunk_vjp`): the augmented forward pass
+  computes z̃, and the pullback writes the seed into the return shadow
+  and consumes the tape — one forward instead of the two the earlier
+  combined-mode `dot(layer(x), s)` loss paid, and no `Active` scalar
+  anywhere (the scalar loss was the one operation Enzyme had to
+  differentiate itself, fatal on GPU arrays; see PLAN_GPU.md task 5).
+  Prepared pullbacks are single-use by contract (re-running a consumed
+  tape aborts Julia for some layers, see git history), so multi-seed
+  rules (`AlphaBetaRule`, `GeneralizedGammaRule`) route their second
+  seed through one-shot `input_vjp`s at the same points — with fast
+  paths still FLOP-optimal (4 forwards + 4 transposes for αβ).
 - **Wrappers take explicit `ps`/`st` arguments, mirroring Lux.**
   `LayerWithRule <: AbstractLuxWrapperLayer{:layer}` is parameter- and
   state-transparent, so the user's `ps`/`st` trees apply to the wrapped
@@ -243,7 +251,7 @@ of lazy `modify_params` and of the VJP strategy:
 Enzyme compiles the reverse pass on the *first* `analyze` call: one
 whole-model thunk specialized on the wrapped model type (rules are type
 parameters, so a different rule assignment recompiles), plus nested
-combined-mode thunks for layers taking the `seeded_pullback` fallback.
+split-mode thunks for layers taking the `thunk_vjp` fallback.
 On a random-init VGG16 (224×224×3×1 input, `EpsilonPlusFlat()` composite,
 Apple M3 Pro, Julia 1.12) the first `analyze` takes ~40 s (the scrapped
 split-thunk engine took ~32 s); warm calls take ~1.8 s, runtime-identical

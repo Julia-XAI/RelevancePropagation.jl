@@ -203,31 +203,91 @@ end
 # VJPs w.r.t. the input of a layer    #
 #=====================================#
 
+# The function the Enzyme reverse passes differentiate, at both levels:
+# the engine pass over the wrapped model (`call_analyzer`) and the
+# per-layer fallback VJP (`thunk_vjp`).
+# Its return value is array-valued (`Duplicated`),
+# so the seed enters as the return shadow in split mode —
+# no scalar loss is manufactured,
+# and the differentiated region contains no array operation
+# outside the custom rules (a GPU-compatibility requirement:
+# Enzyme cannot differentiate GPU-array operations).
+model_output(model, x, ps, st) = first(apply(model, x, ps, st))
+
+"""
+    thunk_vjp(layer, x, ps, st)
+
+Generic split-mode Enzyme fallback of [`prepare_vjp`](@ref):
+run the augmented forward pass of a `ReverseSplitWithPrimal` thunk,
+returning the primal layer output
+together with a single-use `pullback` closure
+that writes its seed into the return shadow
+and runs the reverse pass over the tape.
+"""
+function thunk_vjp(layer, x, ps, st)
+    # The input shadow accumulates the VJP and must be freshly zeroed.
+    dx = zero(x)
+    fwd, rev = autodiff_thunk(
+        ReverseSplitWithPrimal,
+        Const{typeof(model_output)},
+        Duplicated,
+        Const{typeof(layer)},
+        Duplicated{typeof(x)},
+        Const{typeof(ps)},
+        Const{typeof(st)},
+    )
+    tape, z̃, dz = fwd(
+        Const(model_output), Const(layer), Duplicated(x, dx), Const(ps), Const(st)
+    )
+    function pullback(s)
+        dz .= s
+        rev(
+            Const(model_output), Const(layer), Duplicated(x, dx), Const(ps), Const(st), tape
+        )
+        return dx
+    end
+    return z̃, pullback
+end
+
+"""
+    prepare_vjp(layer, x, ps, st)
+
+Run the forward pass of `layer` at `x` and return the layer output `z̃`
+together with a single-use `pullback` closure computing VJPs w.r.t. the
+input `x`: `pullback(s)` returns the VJP with seed `s`.
+
+Layers with an [`input_vjp`](@ref) fast path apply the layer and close over
+the hand-written VJP; everything else takes the split-mode Enzyme fallback
+[`thunk_vjp`](@ref), whose reverse pass consumes the tape of its augmented
+forward pass — so obtaining both the layer output and the VJP costs a
+single forward pass either way.
+Each `pullback` must be called at most once:
+re-running a consumed split-mode tape is undefined behavior.
+Rules needing VJPs with several seeds at the same point call
+[`input_vjp`](@ref) once per additional seed.
+"""
+prepare_vjp(layer, x, ps, st) = thunk_vjp(layer, x, ps, st)
+
+function prepare_vjp(layer::Union{Dense,Scale,Conv,ConvTranspose}, x, ps, st)
+    layer.activation === identity || return thunk_vjp(layer, x, ps, st)
+    return first(apply(layer, x, ps, st)), s -> input_vjp(layer, x, ps, st, s)
+end
+
+function prepare_vjp(layer::Union{MaxPoolLayer,MeanPoolLayer}, x, ps, st)
+    return first(apply(layer, x, ps, st)), s -> input_vjp(layer, x, ps, st, s)
+end
+
 """
     seeded_pullback(layer, x, ps, st, s)
 
-Compute the VJP of `layer` at `x` with seed `s` w.r.t. the input `x` using a
-nested Enzyme reverse pass over the scalar loss `dot(layer(x), s)`.
+Compute the VJP of `layer` at `x` with seed `s` w.r.t. the input `x`
+through the split-mode Enzyme fallback [`thunk_vjp`](@ref),
+discarding the primal.
 
 This is the generic AD fallback of [`input_vjp`](@ref) and the relevance
 propagator for sub-models treated as a single differentiation unit.
 """
-function seeded_pullback(layer, x, ps, st, s)
-    dx = zero(x)
-    autodiff(
-        Reverse,
-        seeded_apply,
-        Active,
-        Const(layer),
-        Duplicated(x, dx),
-        Const(ps),
-        Const(st),
-        Const(s),
-    )
-    return dx
-end
-
-seeded_apply(layer, x, ps, st, s) = dot(first(apply(layer, x, ps, st)), s)
+seeded_pullback(layer, x, ps, st, s) = last(thunk_vjp(layer, x, ps, st))(s)
 
 """
     input_vjp(layer, x, ps, st, s)

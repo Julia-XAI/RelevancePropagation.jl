@@ -58,7 +58,10 @@ Flux.jl models are no longer supported.
   so no scalar loss is differentiated — a prerequisite for GPU-array support.
   Structural backward-pass code for `Chain`, `Parallel` and `SkipConnection` is no longer needed.
   Rules that don't modify parameters or inputs reuse the pre-activations cached during the forward pass,
-  and the inner VJPs of `Dense`, `Scale`, `Conv` and `ConvTranspose` use hand-written fast paths.
+  and the inner VJPs of `Dense`, `Scale`, `Conv`, `ConvTranspose` and pooling layers use hand-written fast paths.
+  Layers without a fast path take a nested split-mode Enzyme pullback
+  whose reverse pass reuses the tape of the forward pass that computed the rule's denominator,
+  so the fallback also runs each modified forward only once.
 * ![Enhancement][badge-enhancement] BatchNorm fusion in `canonize` is now exact: 
   it uses the layer's running statistics and includes `epsilon`
   (v3 ignored it). 

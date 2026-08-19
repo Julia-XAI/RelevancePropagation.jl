@@ -98,6 +98,29 @@ and will be tested in follow-up work on real hardware.
   `analyze` matches CPU to `1.5e-8` abs / `1.2e-7` rel (`ZeroRule`)
   and `1.1e-8` abs / `2.0e-7` rel (`EpsilonPlus` composite) —
   Float32 rounding noise, in line with the earlier Metal measurements.
+- *2026-08-19 (task 5 stage 1 LANDED):* the generic VJP fallback is
+  split-mode. `prepare_vjp(layer, x, ps, st) -> (z̃, pullback)` is the
+  two-phase primitive: fast-path layers apply the layer and close over
+  their hand VJP, everything else runs the augmented forward of a
+  `ReverseSplitWithPrimal` thunk (`thunk_vjp`) and closes over its
+  tape; `seeded_pullback` survives as the one-shot wrapper
+  (`last(thunk_vjp(...))(s)`), so its call sites (CRP's container
+  fallback, the `input_vjp` activation guards, the Zygote cross-check
+  testset) are unchanged. The rule bodies consume it per the taxonomy:
+  the generic `propagate` shares one prepared pullback between z̃ and
+  the VJP (1F+1R on the fallback, was 2F+1R), `ZPlusRule` prepares
+  both points (2F+2R, was 4F+2R), `ZBoxRule` prepares the `l`/`h`
+  points (3F+3R, was 5F+3R), and `AlphaBetaRule`/
+  `GeneralizedGammaRule` prepare their α-/ˡ-points and route the
+  second seed through one-shot `input_vjp`s (6F+4R, was 8F+4R;
+  the 4F+2R target needs stage 2's width-2 `BatchDuplicated`).
+  The combined-mode `dot` loss, the last `Active` scalar below the
+  engine, is gone — with it the `autodiff`/`Reverse`/`Active` imports
+  and the `LinearAlgebra` dependency. `model_output` moved to
+  `src/autodiff.jl`, shared by the engine pass and `thunk_vjp`.
+  A new `prepare_vjp vs Zygote` testset asserts primal and pullback
+  on every layer in `test_autodiff.jl`; the full cold CPU suite
+  passes with zero reference regeneration.
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -948,17 +971,18 @@ Ordered by how likely they are to matter:
    **DONE (2026-08-19)** — see the status entry above. Landed on the
    `MaxPoolLayer`/`MeanPoolLayer` unions (all six pooling types),
    cross-checked on CPU; CNN-on-Metal verified end to end.
-5. Rewrite the generic VJP fallback from `seeded_pullback`'s
+5. ~~Rewrite the generic VJP fallback from `seeded_pullback`'s
    combined-mode `dot` loss to the two-phase split-mode `prepare_vjp`
-   primitive and re-express the rule bodies on it
-   ("Activity patterns for the rule layer" above) —
-   removes the double forward on the fallback path and the last
+   primitive and re-express the rule bodies on it~~
+   **Stage 1 DONE (2026-08-19)** — see the status entry above;
+   removed the double forward on the fallback path and the last
    `Active` scalar below the engine.
-   Builds on task 1's simplified, all-affine rule bodies.
-   Stage 2, optional and separable: width-2 `BatchDuplicated` tapes
-   for `AlphaBetaRule`/`GeneralizedGammaRule`.
-   Acceptance for both stages: the CPU test suite is bit-identical
-   (both patterns measured exact on `Dense`, `probe5.jl`).
+   Stage 2, optional and separable, remains open:
+   width-2 `BatchDuplicated` tapes for
+   `AlphaBetaRule`/`GeneralizedGammaRule`
+   (their second seed currently takes one-shot `input_vjp`s).
+   Acceptance unchanged: the CPU test suite is bit-identical
+   (the width-2 pattern measured exact on `Dense`, `probe5.jl`).
 6. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
 7. Make `zbox_input` allocate through the input
    (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`).

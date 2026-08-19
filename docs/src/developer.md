@@ -197,10 +197,14 @@ should be straightforward to understand:
 function propagate(rule::AbstractLRPRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     ãᵏ = modify_input(rule, aᵏ)
     ρps = modify_params(rule, ps)         # lazily ρ-modified parameters
-    z̃ = (ρps === ps && ãᵏ === aᵏ) ? zᵏ : first(apply(layer, ãᵏ, ρps, st))
+    if ρps === ps && ãᵏ === aᵏ           # z̃ = zᵏ is cached on the tape
+        s = Rᵏ⁺¹ ./ modify_denominator(rule, zᵏ)
+        c = input_vjp(layer, ãᵏ, ρps, st, s)
+        return ãᵏ .* c
+    end
+    z̃, pullback = prepare_vjp(layer, ãᵏ, ρps, st)
     s = Rᵏ⁺¹ ./ modify_denominator(rule, z̃)
-    c = input_vjp(layer, ãᵏ, ρps, st, s)
-    return ãᵏ .* c
+    return ãᵏ .* pullback(s)
 end
 ```
 
@@ -224,21 +228,34 @@ All LRP rules are implemented in the file
 [`/src/rules.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/rules.jl).
 
 ### Input VJPs
-The VJP in step 3 is computed by `input_vjp`.
-For activation-free `Dense`, `Scale`, `Conv` and `ConvTranspose` layers,
-hand-written fast paths compute the VJP directly
+The VJP in step 3 is computed by `input_vjp`
+when the forward pass it belongs to is already available
+(as for the cached $\tilde z = z^k$ above),
+and by the two-phase `prepare_vjp` when it is not:
+`prepare_vjp` runs the modified forward pass
+and returns $\tilde z$ together with a single-use `pullback` closure,
+so the seed can be computed from $\tilde z$ before the VJP runs.
+
+For activation-free `Dense`, `Scale`, `Conv`, `ConvTranspose`
+and pooling layers, hand-written fast paths compute the VJP directly
 (e.g. $W^\top s$ for `Dense`, `∇conv_data` for `Conv`) —
 one transpose-like operation, with no nested AD involved.
-All other layers fall back to `seeded_pullback`,
-a nested Enzyme reverse pass over the scalar loss `dot(layer(x), s)`.
+All other layers fall back to a nested split-mode Enzyme reverse pass:
+its augmented forward pass computes $\tilde z$,
+and the pullback writes the seed into the return shadow
+and consumes the tape —
+one forward pass in total, and no scalar loss anywhere.
 
 ```@docs
 RelevancePropagation.input_vjp
+RelevancePropagation.prepare_vjp
+RelevancePropagation.thunk_vjp
 RelevancePropagation.seeded_pullback
 ```
 
-Rules that require several VJPs with different seeds through the same layer,
-like [`AlphaBetaRule`](@ref), simply call `input_vjp` once per seed.
+Rules that require several VJPs with different seeds at the same point,
+like [`AlphaBetaRule`](@ref), consume their prepared `pullback` for the
+first seed and call `input_vjp` once per additional seed.
 
 ### Specialized implementations
 In other programming languages, LRP is commonly implemented in an object-oriented manner,
