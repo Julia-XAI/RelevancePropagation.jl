@@ -277,6 +277,11 @@ function prepare_vjp(layer::Union{MaxPoolLayer,MeanPoolLayer}, x, ps, st)
     return first(apply(layer, x, ps, st)), s -> input_vjp(layer, x, ps, st, s)
 end
 
+function prepare_vjp(layer::BatchNorm, x, ps, st)
+    batchnorm_is_affine(layer, st) || return thunk_vjp(layer, x, ps, st)
+    return first(apply(layer, x, ps, st)), s -> input_vjp(layer, x, ps, st, s)
+end
+
 """
     seeded_pullback(layer, x, ps, st, s)
 
@@ -296,7 +301,9 @@ Compute the VJP of `layer` at `x` with seed `s` w.r.t. the input `x`.
 
 Activation-free `Dense`, `Scale`, `Conv` and `ConvTranspose` layers use
 hand-written fast paths (one transpose op, no nested AD),
-and pooling layers dispatch to NNlib's pooling gradients;
+pooling layers dispatch to NNlib's pooling gradients,
+and testmode `BatchNorm` over tracked running statistics
+applies the channel-wise slope of its affine map;
 everything else falls back to [`seeded_pullback`](@ref).
 The fast paths are cross-checked against the fallback in the test suite.
 """
@@ -359,6 +366,30 @@ end
 function input_vjp(layer::MeanPoolLayer, x, ps, st, s)
     pdims = pool_dims(layer, x)
     return ∇meanpool(s, meanpool(x, pdims), x, pdims)
+end
+
+# Testmode BatchNorm over tracked running statistics is an affine map;
+# in trainmode or without tracked statistics the batch statistics
+# depend on the input, so only the generic Enzyme fallback applies.
+function batchnorm_is_affine(layer::BatchNorm, st)
+    return layer.activation === identity &&
+           known(layer.track_stats) &&
+           st.training isa Val{false}
+end
+
+# Channel-wise slope `γ ./ sqrt.(σ² .+ ϵ)` of the testmode affine map,
+# reshaped to broadcast along the channel dimension of `x`.
+function batchnorm_slope(layer::BatchNorm, x, ps, st)
+    shape = ntuple(d -> d == ndims(x) - 1 ? layer.chs : 1, ndims(x))
+    ϵ = convert(eltype(x), layer.epsilon)
+    inv_std = inv.(sqrt.(reshape(st.running_var, shape) .+ ϵ))
+    known(layer.affine) || return inv_std
+    return inv_std .* reshape(ps.scale, shape)
+end
+
+function input_vjp(layer::BatchNorm, x, ps, st, s)
+    batchnorm_is_affine(layer, st) || return seeded_pullback(layer, x, ps, st, s)
+    return s .* batchnorm_slope(layer, x, ps, st)
 end
 
 #=========================================#

@@ -7,7 +7,7 @@ using XAIBase: AbstractOutputSelector
 using XAIBase: AbstractFeatureSelector, number_of_features
 
 using Lux: Chain, Parallel, SkipConnection
-using Lux: Dense, Scale, LayerNorm, Conv, ConvTranspose
+using Lux: Dense, Scale, LayerNorm, BatchNorm, Conv, ConvTranspose
 using Lux: NoOpLayer, WrappedFunction
 using LuxCore: LuxCore, apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
 using LuxCore: AbstractLuxWrapperLayer

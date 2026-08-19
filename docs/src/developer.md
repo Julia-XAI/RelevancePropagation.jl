@@ -236,9 +236,11 @@ and by the two-phase `prepare_vjp` when it is not:
 and returns $\tilde z$ together with a single-use `pullback` closure,
 so the seed can be computed from $\tilde z$ before the VJP runs.
 
-For activation-free `Dense`, `Scale`, `Conv`, `ConvTranspose`
-and pooling layers, hand-written fast paths compute the VJP directly
-(e.g. $W^\top s$ for `Dense`, `∇conv_data` for `Conv`) —
+For activation-free `Dense`, `Scale`, `Conv`, `ConvTranspose`,
+pooling and testmode `BatchNorm` layers,
+hand-written fast paths compute the VJP directly
+(e.g. $W^\top s$ for `Dense`, `∇conv_data` for `Conv`,
+the channel-wise slope of the affine map for `BatchNorm`) —
 one transpose-like operation, with no nested AD involved.
 All other layers fall back to a nested split-mode Enzyme reverse pass:
 its augmented forward pass computes $\tilde z$,

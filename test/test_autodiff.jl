@@ -43,6 +43,8 @@ LAYERS = [
     ("AdaptiveMeanPool", AdaptiveMeanPool((2, 2)), x_img),
     ("BatchNorm testmode", BatchNorm(3), x_img),
     ("BatchNorm relu testmode", BatchNorm(3, relu), x_img),
+    ("BatchNorm no affine", BatchNorm(3; affine=false), x_img),
+    ("BatchNorm no track_stats", BatchNorm(3; track_stats=false), x_img),
     ("LayerNorm", LayerNorm((6, 6, 3)), x_img),
     ("LayerNorm relu", LayerNorm((6, 6, 3), relu), x_img),
     ("LayerNorm no affine", LayerNorm((6, 6, 3); affine=false), x_img),
@@ -92,7 +94,7 @@ end
 @testset "input_vjp fast paths vs nested AD" begin
     for (name, layer, x) in LAYERS
         f = remove_activation(layer)
-        f isa Union{Dense,Scale,Conv,ConvTranspose,PoolingLayer} || continue
+        f isa Union{Dense,Scale,Conv,ConvTranspose,PoolingLayer,BatchNorm} || continue
         @testset "$name" begin
             ps, st = setup_testmode(layer)
             z = first(LuxCore.apply(f, x, ps, st))

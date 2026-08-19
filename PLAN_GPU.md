@@ -121,6 +121,23 @@ and will be tested in follow-up work on real hardware.
   A new `prepare_vjp vs Zygote` testset asserts primal and pullback
   on every layer in `test_autodiff.jl`; the full cold CPU suite
   passes with zero reference regeneration.
+- *2026-08-19 (tasks 6–9 LANDED):* the three GPU-unfriendly spots in
+  rule code are broadcast/device-generic —
+  `masked_copy` via `ifelse.` (size check kept),
+  `zbox_input` allocating through the input
+  (`fill!(similar(in), …)` / `copyto!(similar(in, T), …)`),
+  and the `FlatRule`/`Dense` fast path via one `sum(…; dims=1)`
+  broadcast — all three bit-identical on CPU, zero test changes.
+  `BatchNorm` gained `prepare_vjp`/`input_vjp` fast paths:
+  testmode BatchNorm over tracked running statistics applies the
+  channel-wise slope `γ ./ sqrt.(σ² .+ ϵ)` of its affine map
+  (`affine=false` covered; trainmode and `track_stats=false` decline
+  to the generic Enzyme fallback, which remains CPU-only).
+  Cross-checked in `test_autodiff.jl` against the fallback and Zygote
+  (two new BatchNorm variants in the layer list);
+  the un-canonized `BatchNorm(…, relu)` end-to-end test now routes
+  through the fast path and still passes;
+  the full cold CPU suite passes with zero reference regeneration.
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -893,14 +910,10 @@ and `zbox_input`, both above.
 
 Ordered by how likely they are to matter:
 
-- **`BatchNorm` has no `input_vjp` fast path**, so it takes
-  `seeded_pullback` and is dead on GPU arrays. `canonize` fuses BatchNorm
-  into the preceding linear layer, which sidesteps it for canonized
-  models, but an un-canonized model with BatchNorm will fail.
-  A fast path is straightforward (testmode BatchNorm is an affine map,
-  the VJP a channel-wise broadcast — generic, and likely testable
-  end to end on JLArray, though LuxLib's batchnorm on JLArray
-  was not measured).
+- ~~`BatchNorm` has no `input_vjp` fast path~~
+  **resolved (2026-08-19, task 9)**: testmode-over-running-statistics
+  fast path landed; the JLArray end-to-end leg lands with task 10
+  (LuxLib's batchnorm on JLArray still unmeasured).
 - **CRP is blocked upstream in XAIBase**, not here:
   `TopNFeatures(2)` scalar-indexes in its `top_n` sort —
   measured failing on both `MtlArray` and `JLArray`,
@@ -983,12 +996,18 @@ Ordered by how likely they are to matter:
    (their second seed currently takes one-shot `input_vjp`s).
    Acceptance unchanged: the CPU test suite is bit-identical
    (the width-2 pattern measured exact on `Dense`, `probe5.jl`).
-6. Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check.
-7. Make `zbox_input` allocate through the input
-   (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`).
-8. Broadcast the `FlatRule`/`Dense` fast path (`src/rules.jl:613`).
-9. Add a `BatchNorm` `input_vjp` fast path
-   (testmode affine map; generic broadcast).
+6. ~~Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check~~
+   **DONE (2026-08-19)** — bit-identical on CPU.
+7. ~~Make `zbox_input` allocate through the input
+   (`src/rules.jl:374-378`, `fill!(similar(in), …)` / `copyto!`)~~
+   **DONE (2026-08-19)**.
+8. ~~Broadcast the `FlatRule`/`Dense` fast path (`src/rules.jl:613`)~~
+   **DONE (2026-08-19)**.
+9. ~~Add a `BatchNorm` `input_vjp` fast path
+   (testmode affine map; generic broadcast)~~
+   **DONE (2026-08-19)** — see the status entry above; realized as
+   `prepare_vjp`/`input_vjp` methods guarded by `batchnorm_is_affine`
+   (identity activation, tracked statistics, testmode).
 10. Add `test/test_gpu.jl`, parameterized over the device like
    ExplainableAI.jl's (`device = Metal.functional() ? mtl : jl`,
    with `fmap`/`Adapt` for the `ps`/`st` trees).
