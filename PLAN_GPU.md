@@ -84,6 +84,20 @@ and will be tested in follow-up work on real hardware.
   (dev `0.0`) for the `Dense` chain via plain `analyze`;
   CNN-on-Metal re-lands with task 4, which adds the pooling fast
   paths it needs.
+- *2026-08-19 (task 4 LANDED):* pooling `input_vjp` fast paths,
+  realized as two methods on the `MaxPoolLayer`/`MeanPoolLayer` unions,
+  so the adaptive and global variants are covered along with
+  `MaxPool`/`MeanPool`. The `PoolDims` come from calling the layer's
+  nested pool mode (`layer.layer.mode(x)`) rather than reading its
+  fields, exactly as the layer's own forward computes them —
+  consistent by construction for the generic, global and adaptive modes.
+  Cross-checked against `seeded_pullback` for all six pooling types in
+  `test_autodiff.jl` (CPU); the full cold suite passes.
+  CNN-on-Metal re-landed as promised: a
+  `Conv`/`MaxPool`/`MeanPool`/`FlattenLayer`/`Dense` CNN via plain
+  `analyze` matches CPU to `1.5e-8` abs / `1.2e-7` rel (`ZeroRule`)
+  and `1.1e-8` abs / `2.0e-7` rel (`EpsilonPlus` composite) —
+  Float32 rounding noise, in line with the earlier Metal measurements.
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -458,6 +472,9 @@ end
 Cross-checked against `seeded_pullback` on CPU: **exactly equal**
 (max deviation `0.0`) for both layer types.
 These belong in the existing `test_autodiff.jl` fast-path testset.
+(The landed version, task 4, computes the `PoolDims` by calling the
+nested pool mode instead of reading its fields, which extends the fast
+paths to the adaptive and global pooling variants for free.)
 On JLArray these paths cannot run at all
 (NNlib pooling scalar-indexes there), which is fine:
 the cross-check lives on CPU, the device test on Metal/CUDA.
@@ -927,9 +944,10 @@ Ordered by how likely they are to matter:
    **DONE (2026-08-18)** — see the status entry above. CPU suite
    bit-identical with zero reference regeneration; JLArray and Metal
    end-to-end exact via plain `analyze`, no piracy in the setup.
-4. Add `input_vjp` fast paths for `MaxPool` and `MeanPool`
-   (`src/autodiff.jl`, next to the `Conv` methods),
-   cross-checked against `seeded_pullback` in `test_autodiff.jl` (CPU).
+4. ~~Add `input_vjp` fast paths for `MaxPool` and `MeanPool`~~
+   **DONE (2026-08-19)** — see the status entry above. Landed on the
+   `MaxPoolLayer`/`MeanPoolLayer` unions (all six pooling types),
+   cross-checked on CPU; CNN-on-Metal verified end to end.
 5. Rewrite the generic VJP fallback from `seeded_pullback`'s
    combined-mode `dot` loss to the two-phase split-mode `prepare_vjp`
    primitive and re-express the rule bodies on it

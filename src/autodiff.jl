@@ -235,9 +235,10 @@ seeded_apply(layer, x, ps, st, s) = dot(first(apply(layer, x, ps, st)), s)
 Compute the VJP of `layer` at `x` with seed `s` w.r.t. the input `x`.
 
 Activation-free `Dense`, `Scale`, `Conv` and `ConvTranspose` layers use
-hand-written fast paths (one transpose op, no nested AD); everything else
-falls back to [`seeded_pullback`](@ref). The fast paths are cross-checked
-against the fallback in the test suite.
+hand-written fast paths (one transpose op, no nested AD),
+and pooling layers dispatch to NNlib's pooling gradients;
+everything else falls back to [`seeded_pullback`](@ref).
+The fast paths are cross-checked against the fallback in the test suite.
 """
 input_vjp(layer, x, ps, st, s) = seeded_pullback(layer, x, ps, st, s)
 
@@ -282,6 +283,22 @@ function input_vjp(layer::ConvTranspose, x, ps, st, s)
         flipkernel=known(layer.cross_correlation),
     )
     return conv(s, ps.weight, cdims)
+end
+
+# Lux wraps a pooling layer's configuration in a nested pool mode whose call
+# computes the `PoolDims` from the input; calling the mode instead of reading
+# its fields keeps the fast paths consistent with the layer's own forward for
+# all three modes (generic, global, adaptive).
+pool_dims(layer::PoolingLayer, x) = layer.layer.mode(x)
+
+function input_vjp(layer::MaxPoolLayer, x, ps, st, s)
+    pdims = pool_dims(layer, x)
+    return ∇maxpool(s, maxpool(x, pdims), x, pdims)
+end
+
+function input_vjp(layer::MeanPoolLayer, x, ps, st, s)
+    pdims = pool_dims(layer, x)
+    return ∇meanpool(s, meanpool(x, pdims), x, pdims)
 end
 
 #=========================================#

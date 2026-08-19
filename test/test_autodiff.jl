@@ -1,4 +1,4 @@
-using RelevancePropagation: input_vjp, seeded_pullback, remove_activation
+using RelevancePropagation: input_vjp, seeded_pullback, remove_activation, PoolingLayer
 using Test
 
 using Lux
@@ -71,7 +71,7 @@ end
 @testset "input_vjp fast paths vs nested AD" begin
     for (name, layer, x) in LAYERS
         f = remove_activation(layer)
-        f isa Union{Dense,Scale,Conv,ConvTranspose} || continue
+        f isa Union{Dense,Scale,Conv,ConvTranspose,PoolingLayer} || continue
         @testset "$name" begin
             ps, st = setup_testmode(layer)
             z = first(LuxCore.apply(f, x, ps, st))

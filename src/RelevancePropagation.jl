@@ -21,6 +21,7 @@ using Functors: KeyPath
 using LinearAlgebra: dot
 using NNlib: relu, gelu, swish, mish
 using NNlib: conv, ∇conv_data, DenseConvDims
+using NNlib: maxpool, ∇maxpool, meanpool, ∇meanpool
 using Markdown: @md_str
 using Static: known
 using Statistics: mean, var
@@ -35,7 +36,8 @@ using Statistics: mean, var
 include("ModelSurgeon/ModelSurgeon.jl")
 using .ModelSurgeon: ModelSurgeon
 using .ModelSurgeon: DataflowLayer, ConvLayer, DropoutLayer, ReshapingLayer
-using .ModelSurgeon: PoolingLayer, LPPoolLayer, NormalizationLayer
+using .ModelSurgeon: PoolingLayer, MaxPoolLayer, MeanPoolLayer
+using .ModelSurgeon: LPPoolLayer, NormalizationLayer
 using .ModelSurgeon: children_layers, map_layers, chainall
 using .ModelSurgeon: activation_fn, remove_activation
 using .ModelSurgeon: strip_softmax, has_output_softmax
