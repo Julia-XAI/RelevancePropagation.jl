@@ -384,10 +384,10 @@ function propagate(rule::ZBoxRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     return @. aᵏ * c - l * c⁺ - h * c⁻
 end
 
-zbox_input(in::AbstractArray{T}, c::Real) where {T} = fill(convert(T, c), size(in))
+zbox_input(in::AbstractArray{T}, c::Real) where {T} = fill!(similar(in), convert(T, c))
 function zbox_input(in::AbstractArray{T}, A::AbstractArray) where {T}
     @assert size(A) == size(in)
-    return convert.(T, A)
+    return copyto!(similar(in, T), A)
 end
 
 """
@@ -633,9 +633,5 @@ end
 
 function propagate(_rule::FlatRule, _layer::Dense, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
     n = size(aᵏ, 1) # number of input neurons connected to each output neuron
-    Rᵏ = similar(aᵏ)
-    for i in axes(Rᵏ, 2) # samples in batch
-        fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
-    end
-    return Rᵏ
+    return similar(aᵏ) .= sum(Rᵏ⁺¹; dims=1) ./ n
 end

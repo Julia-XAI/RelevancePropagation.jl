@@ -65,10 +65,5 @@ julia> B = masked_copy(A, mask)
 """
 function masked_copy(A::AbstractArray, mask::AbstractArray)
     size(A) != size(mask) && error("Size of array and mask need to match.")
-    out = similar(A)
-    z = zero(eltype(A))
-    @inbounds for i in CartesianIndices(A)
-        out[i] = ifelse(mask[i], A[i], z)
-    end
-    return out
+    return ifelse.(mask, A, zero(eltype(A)))
 end
