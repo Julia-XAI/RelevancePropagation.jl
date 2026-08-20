@@ -29,6 +29,7 @@ Refer to the [LRP rule overview](@ref rules) for a detailed explanation
 of the notation used for LRP rules.
 
 ```@docs
+AbstractLRPRule
 ZeroRule
 EpsilonRule
 GammaRule
@@ -50,6 +51,10 @@ lrp_rules
 ```
 
 ### [Composite primitives](@id api-composite-primitives)
+```@docs
+AbstractCompositePrimitive
+```
+
 #### Mapping layers to rules
 Composite primitives that apply a single rule:
 ```@docs
@@ -60,7 +65,7 @@ FirstLayerMap
 LastLayerMap
 ```
 
-To apply `LayerMap` to nested Flux Chains or `Parallel` layers, 
+To apply `LayerMap` to nested Chains or `Parallel` layers, 
 make use of `show_layer_indices`:
 ```@docs
 show_layer_indices
@@ -77,7 +82,7 @@ FirstNTypeMap
 ```
 
 #### Union types for composites
-The following exported union types types can be used to define TypeMaps:
+The following exported union types can be used to define TypeMaps:
 ```@docs
 ConvLayer
 PoolingLayer
@@ -95,15 +100,6 @@ EpsilonPlusFlat
 EpsilonAlpha2Beta1Flat
 ```
 
-### Manual rule assignment
-For [manual rule assignment](@ref composites-manual), use `ChainTuple`, 
-`ParallelTuple` and `SkipConnectionTuple`, matching the model structure:
-```@docs
-ChainTuple
-ParallelTuple
-SkipConnectionTuple
-```
-
 ## Custom rules 
 These utilities can be used to define custom rules without writing boilerplate code.
 To extend these functions, explicitly `import` them: 
@@ -113,11 +109,12 @@ RelevancePropagation.modify_denominator
 RelevancePropagation.modify_parameters
 RelevancePropagation.modify_weight
 RelevancePropagation.modify_bias
-RelevancePropagation.modify_layer
+RelevancePropagation.modify_params
 RelevancePropagation.is_compatible
 ```
 Compatibility settings:
 ```@docs
+LRP_CONFIG
 LRP_CONFIG.supports_layer
 LRP_CONFIG.supports_activation
 ```

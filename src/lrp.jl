@@ -1,14 +1,103 @@
+#================#
+# Model wrapping #
+#================#
+
+# Validate the rule NamedTuple against the model structure and check
+# rule-layer compatibility. Mirrors the structure of `wrap_rules` below.
+function check_rule_compat(rules::NamedTuple, model::Union{Chain,Parallel}, ps)
+    layers = model.layers
+    if keys(rules) != keys(layers)
+        throw(
+            ArgumentError(
+                "Rule keys $(keys(rules)) don't match layer keys $(keys(layers))."
+            ),
+        )
+    end
+    for k in keys(layers)
+        check_rule_compat(rules[k], layers[k], ps[k])
+    end
+end
+# `SkipConnection` is an `AbstractLuxWrapperLayer`: its `ps`/`st` pass through
+# to the wrapped layer directly, and so do its rules.
+check_rule_compat(rules, sc::SkipConnection, ps) = check_rule_compat(rules, sc.layers, ps)
+# Disambiguation: a rule assigned to a SkipConnection targets the wrapped layer
+function check_rule_compat(rule::AbstractLRPRule, sc::SkipConnection, ps)
+    return check_rule_compat(rule, sc.layers, ps)
+end
+function check_rule_compat(rule::AbstractLRPRule, layer, ps)
+    is_compatible(rule, layer, ps) || throw(LRPCompatibilityError(rule, layer))
+    return nothing
+end
+function check_rule_compat(rules, layer, ps)
+    throw(ArgumentError("Expected an LRP rule for layer $layer, got $rules."))
+end
+
+# Wrap the model in rule-carrying nodes
+# by zipping rules and layers along the model structure:
+# leaves become `LayerWithRule`s
+# (activation-bearing leaves split into `SplitActivationNode`s),
+# branch connections become `ConnectionWithRule`s.
+# Assumes `check_rule_compat` has validated the structure.
+function wrap_children(layers::NamedTuple, rules::NamedTuple)
+    return NamedTuple{keys(layers)}(map(wrap_rules, values(layers), values(rules)))
+end
+wrap_rules(model::Chain, rules::NamedTuple) = Chain(; wrap_children(model.layers, rules)...)
+function wrap_rules(p::Parallel, rules::NamedTuple)
+    return Parallel(ConnectionWithRule(p.connection); wrap_children(p.layers, rules)...)
+end
+function wrap_rules(sc::SkipConnection, rules)
+    return SkipConnection(wrap_rules(sc.layers, rules), ConnectionWithRule(sc.connection))
+end
+function wrap_rules(sc::SkipConnection, rule::AbstractLRPRule)
+    return invoke(wrap_rules, Tuple{SkipConnection,Any}, sc, rule)
+end
+# The wrap-time activation split: a leaf with an activation function is split
+# into an affine node carrying the rule and a `PassRule` activation node,
+# so rules only ever propagate through affine layers.
+function wrap_rules(layer, rule::AbstractLRPRule)
+    σ = activation_fn(layer)
+    (isnothing(σ) || σ === identity) && return LayerWithRule(rule, layer)
+    return SplitActivationNode(
+        LayerWithRule(rule, remove_activation(layer)), activation_node(σ)
+    )
+end
+# The activation child of a split node matches the `WrappedFunction` layers
+# `ModelSurgeon.split_activation` creates, so pre-split models with `PassRule`
+# on their activation layers agree with the fused form.
+activation_node(σ) = LayerWithRule(PassRule(), WrappedFunction(Base.Fix1(broadcast, σ)))
+# A single rule assigned to a container treats the sub-model as one
+# differentiation unit and is exempt from the activation split;
+# `Chain`/`Parallel` methods disambiguate against the container methods above.
+wrap_rules(layer::Chain, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
+wrap_rules(layer::Parallel, rule::AbstractLRPRule) = LayerWithRule(rule, layer)
+
 #=============================#
 # LRP struct and constructors #
 #=============================#
 
 """
-    LRP(model, rules)
-    LRP(model, composite)
+    LRP(model, ps, st, rules)
+    LRP(model, ps, st, composite)
+    LRP(model, ps, st)
 
-Analyze model by applying Layer-Wise Relevance Propagation.
-The analyzer can either be created by passing an array of LRP-rules
-or by passing a composite, see [`Composite`](@ref) for an example.
+Analyze a Lux model by applying Layer-Wise Relevance Propagation.
+
+The analyzer is constructed from the Lux triple of `model`, parameters `ps`
+and states `st`, as returned by `Lux.setup`. Since LRP is inference-only,
+states are converted once via `Lux.testmode` at construction.
+
+Rules are assigned to layers by passing either
+- a `NamedTuple` of LRP rules mirroring the keys of `model.layers`,
+- an `AbstractVector` of LRP rules for flat models, matched positionally, or
+- a [`Composite`](@ref), which assigns rules based on layer type and position.
+If no rules are passed, [`ZeroRule`](@ref) is used on all layers,
+except for activation-only layers, which get the [`PassRule`](@ref).
+
+Nested `Chain` and `Parallel` layers take a nested `NamedTuple` of rules
+mirroring their children; a single rule assigned to such a sub-model instead
+treats it as one unit, differentiating through the entire sub-model at once.
+A single rule assigned to a `SkipConnection` applies to the wrapped layer,
+after relevance has been distributed between the skip and wrapped branches.
 
 # Keyword arguments
 - `normalize_output_relevance`: Selects whether output relevance should be set to 1 before applying LRP backward pass.
@@ -20,144 +109,127 @@ or by passing a composite, see [`Composite`](@ref) for an example.
 [1] G. Montavon et al., Layer-Wise Relevance Propagation: An Overview
 [2] W. Samek et al., Explaining Deep Neural Networks and Beyond: A Review of Methods and Applications
 """
-struct LRP{C<:Chain,R<:ChainTuple,L<:ChainTuple} <: AbstractXAIMethod
-    model::C
+struct LRP{M<:Chain,P,S,R<:NamedTuple} <: AbstractXAIMethod
+    # `model`/`ps`/`st` are the Lux triple the analyzer was built from.
+    # `call_analyzer` wraps each rule-carrying leaf of the model
+    # in a `LayerWithRule` via `wrap_rules`;
+    # since the wrappers are `ps`/`st`-transparent,
+    # the original `ps`/`st` trees apply to the wrapped model unchanged.
+    # One Enzyme reverse pass over the wrapped model computes the explanation.
+    model::M
+    ps::P
+    st::S
     rules::R
-    modified_layers::L
     normalize_output_relevance::Bool
 
-    # Construct LRP analyzer by assigning a rule to each layer
     function LRP(
         model::Chain,
-        rules::ChainTuple;
+        ps,
+        st,
+        rules::NamedTuple;
         normalize_output_relevance::Bool=true,
         skip_checks=false,
-        flatten=true,
         verbose=true,
     )
-        if flatten
-            model = chainflatten(model)
-            rules = chainflatten(rules)
-        end
+        st = testmode(st)
         if !skip_checks
             check_output_softmax(model)
             check_lrp_compat(model; verbose=verbose)
         end
-        modified_layers = get_modified_layers(rules, model)
-        return new{typeof(model),typeof(rules),typeof(modified_layers)}(
-            model, rules, modified_layers, normalize_output_relevance
+        check_rule_compat(rules, model, ps)
+        return new{typeof(model),typeof(ps),typeof(st),typeof(rules)}(
+            model, ps, st, rules, normalize_output_relevance
         )
     end
 end
 
-# Rules can be passed as vector and will be turned to ChainTuple
-LRP(model, rules::AbstractVector; kwargs...) = LRP(model, ChainTuple(rules...); kwargs...)
+# Rules can be passed as a vector for flat models and are matched positionally
+function LRP(model::Chain, ps, st, rules::AbstractVector; kwargs...)
+    layer_keys = keys(model.layers)
+    if length(rules) != length(layer_keys)
+        throw(
+            ArgumentError(
+                "Got $(length(rules)) rules for a model with $(length(layer_keys)) layers."
+            ),
+        )
+    end
+    return LRP(model, ps, st, NamedTuple{layer_keys}(Tuple(rules)); kwargs...)
+end
 
-# Convenience constructor without rules: use ZeroRule everywhere
-LRP(model::Chain; kwargs...) = LRP(model, Composite(ZeroRule()); kwargs...)
+# Construct the NamedTuple of rules by applying a composite
+function LRP(model::Chain, ps, st, c::Composite; kwargs...)
+    return LRP(model, ps, st, lrp_rules(model, c); kwargs...)
+end
 
-# Construct Chain-/ParallelTuple of rules by applying composite
-LRP(model::Chain, c::Composite; kwargs...) = LRP(model, lrp_rules(model, c); kwargs...)
+# Convenience constructor without rules: ZeroRule everywhere, except
+# activation-only layers, which get the same PassRule the wrap-time split
+# assigns to split-out activations — a default-constructed pre-split model
+# thereby agrees with its fused form.
+default_lrp_rule(layer) = is_activation_layer(layer) ? PassRule() : ZeroRule()
+function LRP(model::Chain, ps, st; kwargs...)
+    return LRP(model, ps, st, map_layers(default_lrp_rule, model); kwargs...)
+end
 
 #==========================#
 # Call to the LRP analyzer #
 #==========================#
 
+function relevance_seed(y, idx, normalize::Bool)
+    seed = zero(y)
+    if normalize
+        seed[idx] .= 1
+    else
+        seed[idx] .= y[idx]
+    end
+    return seed
+end
+
+# Insert relevance taps between the outermost children of the wrapped model.
+# The first child needs no tap: the relevance at its input is the input shadow.
+function insert_taps(model::Chain, store)
+    layers = model.layers
+    ks = keys(layers)
+    tapped = ntuple(
+        i -> i == 1 ? layers[i] : TappedLayer(layers[i], store, i - 1), length(ks)
+    )
+    return Chain(; NamedTuple{ks}(tapped)...)
+end
+
 function call_analyzer(
     input::AbstractArray, lrp::LRP, ns::AbstractOutputSelector; layerwise_relevances=false
 )
-    as = get_activations(lrp.model, input)    # compute activations aᵏ for all layers k
-    Rs = similar.(as)
-    mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
-    lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
-    extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
-    return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
-end
-
-get_activations(model, input) = (input, Flux.activations(model, input)...)
-
-function mask_output_neuron!(
-    R_out, a_out, ns::AbstractOutputSelector, normalize_output_relevance::Bool
-)
-    fill!(R_out, 0)
-    idx = ns(a_out)
-    if normalize_output_relevance
-        R_out[idx] .= 1
-    else
-        R_out[idx] .= a_out[idx]
+    (; ps, st, normalize_output_relevance) = lrp
+    model = wrap_rules(lrp.model, lrp.rules)
+    store = layerwise_relevances ? Vector{Any}(undef, length(model.layers) - 1) : nothing
+    if !isnothing(store)
+        model = insert_taps(model, store)
     end
-    return R_out
-end
 
-function lrp_backward_pass!(Rs, as, rules, layers, modified_layers)
-    # Apply LRP rules in backward-pass, inplace-updating relevances `Rs[k]` = Rᵏ
-    for k in length(layers):-1:1
-        lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k + 1])
-    end
-    return Rs
-end
+    # Split-mode reverse pass: the augmented forward returns the model output
+    # together with its shadow, the relevance seed is written into the shadow
+    # between forward and reverse — outside anything Enzyme differentiates —
+    # and the reverse pass accumulates the explanation into `dx`.
+    # `dx` is freshly zeroed because shadows are accumulators.
+    dx = zero(input)
+    fwd, rev = autodiff_thunk(
+        ReverseSplitWithPrimal,
+        Const{typeof(model_output)},
+        Duplicated,
+        Const{typeof(model)},
+        Duplicated{typeof(input)},
+        Const{typeof(ps)},
+        Const{typeof(st)},
+    )
+    tape, output, shadow = fwd(
+        Const(model_output), Const(model), Duplicated(input, dx), Const(ps), Const(st)
+    )
+    output_selection = ns(output)
+    seed = relevance_seed(output, output_selection, normalize_output_relevance)
+    shadow .= seed
+    rev(
+        Const(model_output), Const(model), Duplicated(input, dx), Const(ps), Const(st), tape
+    )
 
-#===========================================#
-# Special calls to Flux's "Dataflow layers" #
-#===========================================#
-
-function lrp!(Rᵏ, rules::ChainTuple, chain::Chain, modified_chain::ChainTuple, aᵏ, Rᵏ⁺¹)
-    as = get_activations(chain, aᵏ)
-    Rs = similar.(as)
-    last(Rs) .= Rᵏ⁺¹
-
-    lrp_backward_pass!(Rs, as, rules, chain, modified_chain)
-    return Rᵏ .= first(Rs)
-end
-
-function lrp!(
-    Rᵏ, rules::ParallelTuple, parallel::Parallel, modified_parallel::ParallelTuple, aᵏ, Rᵏ⁺¹
-)
-    # Re-compute contributions of parallel branches to output activation
-    aᵏ⁺¹s = [layer(aᵏ) for layer in parallel.layers]
-
-    # Distribute the relevance Rᵏ⁺¹ to the i-th branch of the parallel layer
-    # according to the contribution aᵏ⁺¹ᵢ of branch i to the output activation aᵏ⁺¹:
-    #   Rᵏ⁺¹s[i] = Rᵏ⁺¹ .* aᵏ⁺¹s[i] ./ aᵏ⁺¹ = c .* aᵏ⁺¹s[i]
-    c = Rᵏ⁺¹ ./ stabilize_denom(sum(aᵏ⁺¹s))
-    Rᵏ⁺¹s = [c .* aᵏ⁺¹ for aᵏ⁺¹ in aᵏ⁺¹s]
-
-    # Compute individual input relevances Rᵏ for all branches of the parallel layer
-    Rᵏs = [similar(aᵏ) for _ in parallel.layers]  # pre-allocate output
-    for (Rᵏ, rule, layer, modified_layer, Rᵏ⁺¹) in
-        zip(Rᵏs, rules, parallel.layers, modified_parallel, Rᵏ⁺¹s)
-        # In-place update Rᵏᵢ and therefore Rᵏs
-        lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
-    end
-    # Sum up individual input relevances
-    return Rᵏ .= sum(Rᵏs)
-end
-
-function lrp!(
-    Rᵏ,
-    rules::SkipConnectionTuple,
-    sc::SkipConnection,
-    modified_sc::SkipConnectionTuple,
-    aᵏ,
-    Rᵏ⁺¹,
-)
-    # Compute contributions of layer and skip connection to output activation.
-    # For the skip connection, activations stay constant: aᵏ⁺¹_skip = aᵏ_skip = aᵏ
-    aᵏ⁺¹_layers = sc.layers(aᵏ)
-    c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # using aᵏ = aᵏ⁺¹_skip
-
-    # Distribute relevance accoring to contribution to output activation
-    # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
-    Rᵏ⁺¹_layers = c .* aᵏ⁺¹_layers
-    Rᵏ_skip = c .* aᵏ  # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip
-
-    # Compute input relevance Rᵏ of layers
-    Rᵏ_layers = similar(Rᵏ_skip) # pre-allocate output
-    rules = ChainTuple(rules.vals)
-    chain = Chain(sc.layers)
-    modified_chain = ChainTuple(modified_sc.vals)
-    lrp!(Rᵏ_layers, rules, chain, modified_chain, aᵏ, Rᵏ⁺¹_layers)
-
-    # Sum up input relevances
-    return Rᵏ .= Rᵏ_layers .+ Rᵏ_skip
+    extras = isnothing(store) ? nothing : (; layerwise_relevances=(dx, store..., seed))
+    return Explanation(dx, input, output, output_selection, :LRP, :attribution, extras)
 end

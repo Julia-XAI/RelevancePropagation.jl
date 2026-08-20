@@ -6,12 +6,25 @@
 #md #     This package is part the [Julia-XAI ecosystem](https://github.com/Julia-XAI)
 #md #     and builds on the basics shown in the [*Getting started* guide](https://julia-xai.github.io/XAIDocs/).
 
-# We start out by loading the same pre-trained LeNet5 model and MNIST input data:
+# We start out by loading the same pre-trained LeNet-5 model and MNIST input data:
 using RelevancePropagation
-using Flux
+using Lux
+using JLD2
+using StableRNGs: StableRNG
 
-using BSON # hide
-model = BSON.load("../model.bson", @__MODULE__)[:model] # load pre-trained LeNet-5 model
+model = Chain(
+    Conv((5, 5), 1 => 6, relu),
+    MaxPool((2, 2)),
+    Conv((5, 5), 6 => 16, relu),
+    MaxPool((2, 2)),
+    FlattenLayer(),
+    Dense(256 => 120, relu),
+    Dense(120 => 84, relu),
+    Dense(84 => 10),
+);
+
+ps = load("../model.jld2", "ps"); # load pre-trained parameters
+_, st = Lux.setup(StableRNG(123), model); # all layers in LeNet-5 are stateless
 #-
 using MLDatasets
 using ImageCore, ImageIO, ImageShow
@@ -25,13 +38,16 @@ convert2image(MNIST, x)
 # ## Step 1: Create LRP analyzer
 # To create a CRP analyzer, first define an LRP analyzer with your desired rules:
 composite = EpsilonPlusFlat()
-lrp_analyzer = LRP(model, composite)
+lrp_analyzer = LRP(model, ps, st, composite)
+
+# Note that CRP assumes flat models like our LeNet-5;
+# use [`flatten_model`](@ref) on nested models.
 
 # ## Step 2: Define concepts
 # Then, specify the index of the layer on the outputs of which you want to condition the explanation.
 # In this example, we are interested in the outputs of the last convolutional layer, layer 3:
-feature_layer = 3    # index of relevant layer in model
-model[feature_layer] # show layer
+feature_layer = 3          # index of relevant layer in model
+model.layers.layer_3       # show layer
 
 # Then, specify the concepts / features you are interested in.
 # To automatically select the $n$ most relevant features, use [`TopNFeatures`](@ref).

@@ -95,169 +95,217 @@ $W$ and later multiplying it with $s$.
 This is due to the fact that computing the full Jacobian of a function 
 $f: \mathbb{R}^n \rightarrow \mathbb{R}^m$ requires computing $m$ VJPs.
 
-Functions that compute VJP's are commonly called *pullbacks*.
-Using the [Zygote.jl](https://github.com/FluxML/Zygote.jl) AD system,
-we obtain the output $z$ of a modified layer and its pullback `back` in a single function call:
-
-```julia
-z, back = pullback(modified_layer, aᵏ)
-```
-We then call the pullback with the vector $s$ to obtain $c$:
-```julia
-c = back(s)
-```
-
 **Finally, step 4** consists of an element-wise multiplication of the vector $c$ 
 with the input activation vector $a^k$, resulting in the relevance vector $R^k$.
 
-This AD-based implementation is used in RelevancePropagation.jl as the default method
-for all layer types that don't have a more optimized implementation
-(e.g. fully connected layers).
-We will refer to it as the *"AD fallback"*.
+This four-step computation is the body of the generic rule implementation,
+the function [`propagate`](@ref RelevancePropagation.propagate) described below.
+It is used in RelevancePropagation.jl as the default method
+for all combinations of rules and layer types
+that don't have a more specialized implementation.
 
 For more background information on automatic differentiation, refer to the 
 [JuML lecture on AD](https://adrianhill.de/julia-ml-course/L6_Automatic_Differentiation/).
 
-## LRP analyzer struct
-The [`LRP`](@ref) analyzer struct holds three fields:
-the `model` to analyze, the LRP `rules` to use, and pre-allocated `modified_layers`.
+## LRP by redefining Enzyme's VJPs
+Notice that the four steps above are a *modified VJP*:
+the incoming relevance $R^{k+1}$ plays the role of the output cotangent,
+which is massaged (divided by $\tilde z$),
+pulled back through a parameter-modified layer,
+and massaged again (multiplied by $\tilde a^k$).
+In other words, **LRP is reverse-mode AD in which each layer's true VJP is
+replaced by the rule's relevance propagation map** —
+the relevance $R^k$ *is* the cotangent at the layer input $a^k$.
 
-As described in the section on [*Composites*](@ref composites),
-applying a composite to a model will return LRP rules in nested
-[`ChainTuple`](@ref), [`ParallelTuple`](@ref) and [`SkipConnectionTuple`](@ref)s.
-These wrapper types are used to match the structure of Flux models with `Chain`, 
-`Parallel` and `SkipConnection` layers while avoiding type piracy.
+RelevancePropagation.jl implements LRP exactly this way,
+by redefining the VJPs Enzyme uses:
+one Enzyme reverse pass over the model computes the entire explanation,
+and every rule is an [`EnzymeRules`](https://enzyme.mit.edu/julia/stable/generated/custom_rule/)
+custom rule that replaces the layer's VJP.
+Enzyme's input shadow `dx` — what would be the input gradient in plain
+backpropagation — is the explanation.
+The output relevance seed enters as the *return shadow*:
+the pass runs in Enzyme's split mode,
+and the seed is written into the model output's shadow
+between the forward and the reverse pass,
+outside anything Enzyme differentiates.
 
-When creating an `LRP` analyzer with the default keyword argument `flatten=true`, 
-`flatten_model` is called on the model and rules.
-This is done for performance reasons, as discussed in 
-[*Flattening the model*](@ref flatten-model).
+This design has several consequences:
+- The forward pass, the reverse iteration over layers, and the dataflow
+  routing through `Chain`, `Parallel` and `SkipConnection` layers are all
+  handled by Lux's own `apply` plumbing, differentiated by Enzyme.
+  There is no hand-rolled backward-pass engine.
+- Relevance summation at branch points falls out of shadow accumulation:
+  when two branches propagate relevance to the same input,
+  Enzyme accumulates both contributions into the same shadow.
+- The relevance *split* at branch points is one small custom rule on the
+  connection function of `Parallel` and `SkipConnection` layers,
+  which distributes relevance proportionally to each branch's contribution.
 
-After passing the [*Model checks*](@ref model-checks),
-modified layers are pre-allocated, once again using the `ChainTuple`, `ParallelTuple` 
-and `SkipConnectionTuple` wrapper types to match the structure of the model.
-If a rule doesn't modify a layer, 
-the corresponding entry in `modified_layers` is set to `nothing`, 
-avoiding unnecessary allocations. 
-If a rule requires multiple modified layers, 
-the corresponding entry in `modified_layers` is set to a named tuple of modified layers.
-Apart from these special cases, 
-the corresponding entry in `modified_layers` is simply set to the modified layer.
+All Enzyme-specific code is contained in the file
+[`/src/autodiff.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/autodiff.jl).
 
-For a detailed description of the layer modification mechanism, refer to the section on
-[*Advanced layer modification*](@ref custom-rules-advanced).
+### Rule-carrying nodes
+When called, the [`LRP`](@ref) analyzer first *wraps* the model:
+each layer that has a rule assigned to it is wrapped in a `LayerWithRule`,
+and each branch connection in a `ConnectionWithRule`.
+The wrappers are parameter- and state-transparent,
+so the model's original `ps` and `st` trees apply to the wrapped model unchanged.
 
-## Forward and reverse pass
-When calling an `LRP` analyzer, a forward pass through the model is performed,
-saving the activations $aᵏ$ for all layers $k$ in a vector called `as`.
-This vector of activations is then used to pre-allocate the relevances $R^k$ 
-for all layers in a vector called `Rs`.
-This is possible since for any layer $k$, $a^k$ and $R^k$ have the same shape.
-Finally, the last array of relevances $R^N$ in `Rs` is set to zeros, 
-except for the specified output neuron, which is set to one.
+Layers that carry an activation function are split at wrap time
+into a `SplitActivationNode`:
+the activation-stripped, affine part carries the rule,
+and the activation follows as a separate node carrying the [`PassRule`](@ref).
+The activation stays in the compute graph —
+the forward pass is unchanged —
+but the reverse pass passes relevance through it untouched,
+as LRP prescribes for elementwise activations.
+"LRP ignores activations" is thereby a structural property of the wrapped model,
+and rules only ever propagate through affine (or activation-free) layers.
+Sub-models treated as one differentiation unit are exempt from the split.
 
-We can now run the reverse pass, iterating backwards over the layers in the model
-and writing relevances $R^k$ into the pre-allocated array `Rs`:
-
-```julia
-for k in length(model):-1:1
-    #                  └─ loop over layers in reverse
-    lrp!(Rs[k], rules[k], layers[k], modified_layers[k], as[k], Rs[k+1])
-    #    └─ Rᵏ: modified in-place                        └─ aᵏ  └─ Rᵏ⁺¹
-end
+```@docs
+RelevancePropagation.LayerWithRule
+RelevancePropagation.SplitActivationNode
+RelevancePropagation.lrp_node
+RelevancePropagation.ConnectionWithRule
 ```
 
-This is done by calling low-level functions
+Applying a `LayerWithRule` routes the layer call through the function `lrp_node`,
+whose Enzyme custom rule does two things:
+- The *augmented forward pass* applies the (affine) layer
+  and caches the input $a^k$ and its output —
+  the pre-activation $z^k$ — on Enzyme's tape.
+- The *reverse pass* receives the accumulated output relevance $R^{k+1}$
+  in the return shadow and calls the rule's
+  [`propagate`](@ref RelevancePropagation.propagate) function,
+  accumulating the resulting $R^k$ into the input shadow.
 
-```julia
-function lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
-    Rᵏ .= ...
-end
-```
-
-that implement individual LRP rules.
-The correct rule is applied via 
-[multiple dispatch](https://www.youtube.com/watch?v=kc9HwsxE1OY)
-on the types of the arguments `rule` and `modified_layer`.
-The relevance `Rᵏ` is then computed based on the input activation `aᵏ`
-and the output relevance `Rᵏ⁺¹`.
-
-
-The exclamation point in the function name `lrp!` is a 
-[naming convention](https://docs.julialang.org/en/v1/manual/style-guide/#bang-convention)
-in Julia to denote functions that modify their arguments -- 
-in this case the first argument `Rs[k]`, which corresponds to $R^k$.
+Caching the pre-activation $z^k$ is a key optimization:
+for rules that neither modify the input nor the parameters
+(like [`ZeroRule`](@ref) and [`EpsilonRule`](@ref), the most common case),
+$\tilde z = z^k$ is already on the tape,
+so step 1 requires no additional forward pass at all.
 
 ### Rule calls
-As discussed in [*The AD fallback*](@ref fallback),
-the default LRP fallback for unknown layers uses AD via 
-[Zygote](https://github.com/FluxML/Zygote.jl).
-Now that you are familiar with both the API and the four-step computation of the generic LRP rules,
-the following implementation should be straightforward to understand:
+Now that you are familiar with both the API and the four-step computation of
+the generic LRP rules, the following implementation,
+which is the actual generic rule from `src/rules.jl`,
+should be straightforward to understand:
 
 ```julia
-function lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)
-   # Use modified_layer if available
-   layer = isnothing(modified_layer) ? layer : modified_layer
-
-   ãᵏ = modify_input(rule, aᵏ)
-   z, back = pullback(modified_layer, ãᵏ)
-   s = Rᵏ⁺¹ ./ modify_denominator(rule, z)
-   Rᵏ .= ãᵏ .* only(back(s))
+function propagate(rule::AbstractLRPRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    ãᵏ = modify_input(rule, aᵏ)
+    ρps = modify_params(rule, ps)         # lazily ρ-modified parameters
+    if ρps === ps && ãᵏ === aᵏ           # z̃ = zᵏ is cached on the tape
+        s = Rᵏ⁺¹ ./ modify_denominator(rule, zᵏ)
+        c = input_vjp(layer, ãᵏ, ρps, st, s)
+        return ãᵏ .* c
+    end
+    z̃, pullback = prepare_vjp(layer, ãᵏ, ρps, st)
+    s = Rᵏ⁺¹ ./ modify_denominator(rule, z̃)
+    return ãᵏ .* pullback(s)
 end
 ```
 
-Not only `lrp!` dispatches on the rule and layer type, 
+```@docs
+RelevancePropagation.propagate
+```
+
+`propagate` is a *pure function*: it receives everything it needs as arguments
+and returns the input relevance.
+Rules only hold their hyperparameters — modified parameters are computed
+lazily from the layer's `ps` NamedTuple on each call via
+[`modify_params`](@ref RelevancePropagation.modify_params),
+which returns `ps` itself (`===`) when nothing changes,
+signalling that the cached pre-activation can be reused.
+
+Not only `propagate` dispatches on the rule and layer type, 
 but also the internal functions `modify_input` and `modify_denominator`.
 Unknown layers that are registered in the `LRP_CONFIG` use this exact function.
 
 All LRP rules are implemented in the file
-[`/src/rules.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/master/src/rules.jl).
+[`/src/rules.jl`](https://github.com/Julia-XAI/RelevancePropagation.jl/blob/main/src/rules.jl).
+
+### Input VJPs
+The VJP in step 3 is computed by `input_vjp`
+when the forward pass it belongs to is already available
+(as for the cached $\tilde z = z^k$ above),
+and by the two-phase `prepare_vjp` when it is not:
+`prepare_vjp` runs the modified forward pass
+and returns $\tilde z$ together with a single-use `pullback` closure,
+so the seed can be computed from $\tilde z$ before the VJP runs.
+
+For activation-free `Dense`, `Scale`, `Conv`, `ConvTranspose`,
+pooling and testmode `BatchNorm` layers,
+hand-written fast paths compute the VJP directly
+(e.g. $W^\top s$ for `Dense`, `∇conv_data` for `Conv`,
+the channel-wise slope of the affine map for `BatchNorm`) —
+one transpose-like operation, with no nested AD involved.
+All other layers fall back to a nested split-mode Enzyme reverse pass:
+its augmented forward pass computes $\tilde z$,
+and the pullback writes the seed into the return shadow
+and consumes the tape —
+one forward pass in total, and no scalar loss anywhere.
+
+```@docs
+RelevancePropagation.input_vjp
+RelevancePropagation.prepare_vjp
+RelevancePropagation.prepare_vjp2
+RelevancePropagation.thunk_vjp
+RelevancePropagation.thunk_vjp2
+RelevancePropagation.seeded_pullback
+```
+
+Rules that require VJPs with two different seeds at the same point,
+like [`AlphaBetaRule`](@ref), use the two-seed variant `prepare_vjp2`:
+on the Enzyme fallback it prepares a width-2 `BatchDuplicated` tape,
+so both VJPs share one augmented forward and one batched reverse pass.
 
 ### Specialized implementations
 In other programming languages, LRP is commonly implemented in an object-oriented manner,
 providing a single backward pass implementation per rule.
 This can be seen as a form of *single dispatch* on the rule type.
 
-Using multiple dispatch, we can implement specialized versions of `lrp!` that not only
-take into account the rule type, but also the layer type, 
+Using multiple dispatch, we can implement specialized versions of `propagate`
+that not only take into account the rule type, but also the layer type, 
 for example for fully connected layers or reshaping layers. 
 
-Reshaping layers don't affect attributions. We can therefore avoid the computational
-overhead of AD by writing a specialized implementation that simply reshapes back:
+Reshaping and dropout layers don't affect attributions.
+For rules that neither modify the input nor the denominator
+([`ZeroRule`](@ref) and [`EpsilonRule`](@ref)),
+we can therefore avoid the computational overhead of AD
+by writing specialized implementations that simply reshape back:
 ```julia
-function lrp!(Rᵏ, rule, layer::ReshapingLayer, modified_layer, aᵏ, Rᵏ⁺¹)
-    Rᵏ .= reshape(Rᵏ⁺¹, size(aᵏ))
+function propagate(rule::ZeroRule, layer::ReshapingLayer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    return reshape(Rᵏ⁺¹, size(aᵏ))
 end
 ```
+RelevancePropagation.jl provides these specializations for `ZeroRule` and
+`EpsilonRule` on both `ReshapingLayer` and `DropoutLayer` types.
 
-We can even provide a specialized implementation of the generic LRP rule for `Dense` layers. Since we can access the weight matrix directly, we can skip the use of automatic differentiation
-and implement the following equation directly, using Einstein summation notation:
-
-```math
-R_j^k = \sum_i \frac{\rho(W_{ij}) \; a_j^k}{\epsilon + \sum_{l} \rho(W_{il}) \; a_l^k + \rho(b_i)} R_i^{k+1}
-```
+Some rule–layer combinations don't require a VJP at all.
+The [`FlatRule`](@ref) distributes relevance uniformly over all input neurons
+connected to an output neuron, so for `Dense` layers, the input relevance can
+be written directly, skipping both the forward pass and AD:
 
 ```julia
-function lrp!(Rᵏ, rule, layer::Dense, modified_layer, aᵏ, Rᵏ⁺¹)
-   # Use modified_layer if available
-   layer = isnothing(modified_layer) ? layer : modified_layer
-
-   ãᵏ = modify_input(rule, aᵏ)
-   z = modify_denominator(rule, layer(ãᵏ))
-
-   # Implement LRP using Einsum notation, where `b` is the batch index
-   @tullio Rᵏ[j, b] = layer.weight[i, j] * ãᵏ[j, b] / z[i, b] * Rᵏ⁺¹[i, b]
+function propagate(rule::FlatRule, layer::Dense, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    n = size(aᵏ, 1) # number of input neurons connected to each output neuron
+    Rᵏ = similar(aᵏ)
+    for i in axes(Rᵏ, 2) # samples in batch
+        fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
+    end
+    return Rᵏ
 end
 ```
-
 
 For maximum low-level control beyond `modify_input` and `modify_denominator`,
-you can also implement your own `lrp!` function and dispatch
+you can also implement your own `propagate` method and dispatch
 on individual rule types `MyRule` and layer types `MyLayer`:
 ```julia
-function lrp!(Rᵏ, rule::MyRule, layer::MyLayer, modified_layer, aᵏ, Rᵏ⁺¹)
-    Rᵏ .= ...
+function propagate(rule::MyRule, layer::MyLayer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
+    return ...
 end
 ```
 

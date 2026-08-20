@@ -1,10 +1,7 @@
-const COLOR_COMMENT    = :light_black
-const COLOR_ARROW      = :light_black
-const COLOR_RULE       = :yellow
-const COLOR_TYPE       = :light_blue
-const COLOR_RANGE      = :green
-const COLOR_CHECK_PASS = :green
-const COLOR_CHECK_FAIL = :red
+const COLOR_COMMENT = :light_black
+const COLOR_ARROW   = :light_black
+const COLOR_RULE    = :yellow
+const COLOR_TYPE    = :light_blue
 
 typename(x) = string(nameof(typeof(x)))
 
@@ -14,94 +11,74 @@ typename(x) = string(nameof(typeof(x)))
 
 layer_name(io::IO, l) = string(sprint(show, l; context=io))
 
-function get_name_padding(names::Union{ChainTuple,ParallelTuple,SkipConnectionTuple})
-    children = filter(isleaf, names.vals)
-    isempty(children) && return 0
-    return maximum(length.(children))
+# Pad the printed names of leaf layers within a container to align the rules
+function get_name_padding(io::IO, layers)
+    leaves = [layer_name(io, l) for l in layers if !(l isa DataflowLayer)]
+    isempty(leaves) && return 0
+    return maximum(length, leaves)
 end
-function Base.show(io::IO, m::MIME"text/plain", lrp::LRP)
-    layer_names = chainmap(Base.Fix1(layer_name, io), lrp.model)
-    npad = get_name_padding(layer_names)
 
+function Base.show(io::IO, m::MIME"text/plain", lrp::LRP)
+    npad = get_name_padding(io, values(lrp.model.layers))
     println(io, "LRP", "(")
-    for (name, rule) in zip(layer_names, lrp.rules)
-        print_rule(io, name, rule, 1, npad)
+    for (layer, rule) in zip(values(lrp.model.layers), values(lrp.rules))
+        print_rule(io, layer, rule, 1, npad)
     end
     print(io, ")")
 end
 
-for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
-    tuple_name = string(T)
-    @eval begin
-        function print_rule(io::IO, names::$T, rules::$T, indent::Int=0, npad::Int=0)
-            npad = get_name_padding(names)
-            println(io, "  "^indent, $tuple_name, "(")
-            for (name, rule) in zip(children(names), children(rules))
-                print_rule(io, name, rule, indent + 1, npad)
-            end
-            println(io, "  "^indent, "),")
-        end
-    end # eval
+# Rules for `Chain` and `Parallel` are nested NamedTuples mirroring the model
+function print_rule(
+    io::IO, container::Union{Chain,Parallel}, rules::NamedTuple, indent::Int=0, npad::Int=0
+)
+    println(io, "  "^indent, typename(container), "(")
+    npad = get_name_padding(io, values(container.layers))
+    for (layer, rule) in zip(values(container.layers), values(rules))
+        print_rule(io, layer, rule, indent + 1, npad)
+    end
+    println(io, "  "^indent, "),")
 end
 
-function print_rule(io::IO, name, rule, indent::Int=0, npad::Int=0)
-    print(io, "  "^indent, rpad(name, npad))
+# `SkipConnection` is transparent in `rules` (like in `ps`/`st`)
+function print_rule(io::IO, sc::SkipConnection, rules, indent::Int=0, npad::Int=0)
+    println(io, "  "^indent, typename(sc), "(")
+    npad = get_name_padding(io, (sc.layers,))
+    print_rule(io, sc.layers, rules, indent + 1, npad)
+    println(io, "  "^indent, "),")
+end
+
+function print_rule(io::IO, layer, rule, indent::Int=0, npad::Int=0)
+    print(io, "  "^indent, rpad(layer_name(io, layer), npad))
     printstyled(io, " => "; color=COLOR_ARROW)
     printstyled(io, rule; color=COLOR_RULE)
     println(io, ",")
 end
 
-#=============================#
-# Print result of model check #
-#=============================#
+#===============#
+# Layer indices #
+#===============#
 
-function print_lrp_model_check(io::IO, model)
-    layer_names = chainmap(Base.Fix1(layer_name, io), model)
-    npad = get_name_padding(layer_names)
-    print_lrp_model_check(io, model, layer_names, 1, npad)
+function Base.show(io::IO, ::MIME"text/plain", li::LayerIndices)
+    println(io, "LayerIndices(")
+    _print_indices(io, li.indices)
+    print(io, ")")
 end
 
-for T in (:ChainTuple, :ParallelTuple)
-    tuple_name = string(T)
-    @eval begin
-        function print_lrp_model_check(io::IO, model, names::$T, indent::Int=0, npad::Int=0)
-            npad = get_name_padding(names)
-            println(io, "  "^indent, $tuple_name, "(")
-            for (layer, name) in zip(children(model), children(names))
-                print_lrp_model_check(io, layer, name, indent + 1, npad)
-            end
-            println(io, "  "^indent, "),")
-        end
-    end # eval
-end
-
-function print_lrp_model_check(io::IO, layer, name, indent::Int=0, npad::Int=0)
-    print(io, "  "^indent, rpad(name, npad))
-    printstyled(io, " => "; color=COLOR_ARROW)
-    print_layer_check(io, layer)
-    println(io, ",")
-end
-
-function print_layer_check(io, l)
-    layer_failed = !lrp_check_layer_type(l)
-    activ_failed = !lrp_check_activation(l)
-    activ = activation_fn(l)
-
-    if layer_failed && activ_failed
-        return printstyled(
-            io,
-            "unsupported or unknown activation function $activ and layer type";
-            color=COLOR_CHECK_FAIL,
-        )
-    elseif activ_failed
-        return printstyled(
-            io, "unsupported or unknown activation function $activ"; color=COLOR_CHECK_FAIL
-        )
-    elseif layer_failed
-        return printstyled(io, "unknown layer type"; color=COLOR_CHECK_FAIL)
+function _print_indices(io::IO, nt::NamedTuple)
+    for v in values(nt)
+        _print_index(io, v, 1)
     end
-    return printstyled(io, "supported"; color=COLOR_CHECK_PASS)
 end
+_print_indices(io::IO, path::KeyPath) = _print_index(io, path, 1)
+
+function _print_index(io::IO, nt::NamedTuple, indent::Int)
+    println(io, "  "^indent, "(")
+    for v in values(nt)
+        _print_index(io, v, indent + 1)
+    end
+    println(io, "  "^indent, "),")
+end
+_print_index(io::IO, path::KeyPath, indent::Int) = println(io, "  "^indent, path, ",")
 
 #===========#
 # Composite #
@@ -143,7 +120,7 @@ function _show_primitive(io::IO, r::AbstractCompositeTypeMap, indent::Int=0)
     for (type, rule) in r.map
         _print_type_rule(io, type, rule, indent + 1, npad)
     end
-    println(io, " "^(indent), "),")
+    println(io, "  "^indent, "),")
 end
 
 function _print_type_rule(io::IO, type::Type, rule, indent::Int=0, npad=0)

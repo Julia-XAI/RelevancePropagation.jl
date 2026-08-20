@@ -10,10 +10,112 @@ end
 Composite(primitives...) = Composite(primitives)
 Composite(rule::AbstractLRPRule, prims...) = Composite((GlobalMap(rule), prims...))
 
+#================#
+# Layer indexing #
+#================#
+
+# Layers are addressed by `Functors.KeyPath`s mirroring the keys of the
+# model's `ps`/`st` NamedTuples, e.g. `KeyPath(:layer_2, :layer_3)`.
+
+"""
+    layer_indices(model)
+
+Enumerate all layers in a Lux model, mirroring the model structure as nested
+`NamedTuple`s with `Functors.KeyPath` leaves that address each layer like the
+model's `ps` and `st`.
+
+The returned `NamedTuple` prints on a single line; use
+[`show_layer_indices`](@ref) for a readable, per-layer rendering.
+"""
+layer_indices(model) = layer_indices(model, KeyPath())
+function layer_indices(model::Union{Chain,Parallel}, path::KeyPath)
+    layers = model.layers
+    ks = keys(layers)
+    return NamedTuple{ks}(
+        map(k -> layer_indices(getproperty(layers, k), KeyPath(path, k)), ks)
+    )
+end
+# `SkipConnection` is an `AbstractLuxWrapperLayer`:
+# its `ps`/`st` pass through to the wrapped layer directly.
+layer_indices(model::SkipConnection, path::KeyPath) = layer_indices(model.layers, path)
+layer_indices(layer, path::KeyPath) = path
+
+"""
+    show_layer_indices(model)
+
+Print the layer indices of a Lux model, one `KeyPath` per line, mirroring the
+model structure. This is primarily a utility to help define [`LayerMap`](@ref)
+primitives.
+
+# Example
+```jldoctest; setup = :(using RelevancePropagation, Lux)
+julia> d = Dense(2 => 2);
+
+julia> model = Chain(d, Parallel(+, d, d, Chain(d, d)), d);
+
+julia> show_layer_indices(model)
+LayerIndices(
+  KeyPath(:layer_1,),
+  (
+    KeyPath(:layer_2, :layer_1),
+    KeyPath(:layer_2, :layer_2),
+    (
+      KeyPath(:layer_2, :layer_3, :layer_1),
+      KeyPath(:layer_2, :layer_3, :layer_2),
+    ),
+  ),
+  KeyPath(:layer_3,),
+)
+```
+"""
+show_layer_indices(model) = LayerIndices(layer_indices(model))
+
+# Wrapper around the nested `KeyPath` structure returned by `layer_indices`
+# (a `KeyPath` for a single layer), printed with one path per line (show.jl).
+struct LayerIndices{T<:Union{NamedTuple,KeyPath}}
+    indices::T
+end
+
+# Prefix matching: `a` is at or nested below `b`.
+# keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1))            -> true
+# keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_2))            -> false
+# keypath_in(KeyPath(:layer_1, :layer_2), KeyPath(:layer_1, :layer_2))  -> true
+# keypath_in(KeyPath(:layer_1), KeyPath(:layer_1, :layer_2))            -> false
+
+# `Functors.KeyPath` is what `Lux.layer_map` uses to address layers, and the
+# `Symbol` entries (`:layer_1`, ...) are Lux's own keys: Chain children live
+# in a NamedTuple, so keys are Symbols, not integers, and custom layer names
+# (`Chain(; conv=..., fc=...)`) are addressed by the same mechanism.
+function keypath_in(a::KeyPath, b::KeyPath)
+    length(a) < length(b) && return false
+    return all(a[i] == b[i] for i in 1:length(b))
+end
+
+first_leaf(nt::NamedTuple) = first_leaf(first(values(nt)))
+first_leaf(x) = x
+last_leaf(nt::NamedTuple) = last_leaf(last(values(nt)))
+last_leaf(x) = x
+
+# Zip a Lux model tree with a mirroring NamedTuple, applying `f` to the leaves.
+function zip_layers(f, model::Union{Chain,Parallel}, nt::NamedTuple)
+    layers = model.layers
+    return NamedTuple{keys(layers)}(
+        map((l, x) -> zip_layers(f, l, x), values(layers), values(nt))
+    )
+end
+zip_layers(f, model::SkipConnection, x) = zip_layers(f, model.layers, x)
+zip_layers(f, layer, x) = f(layer, x)
+
 #=================#
 # Rule primitives #
 #=================#
 
+"""
+    AbstractCompositePrimitive
+
+Abstract supertype of all composite primitives.
+See [`Composite`](@ref) for a list of all available primitives.
+"""
 abstract type AbstractCompositePrimitive end
 abstract type AbstractCompositeMap <: AbstractCompositePrimitive end
 
@@ -31,17 +133,27 @@ end
 """
     LayerMap(index, rule)
 
-Composite primitive that maps an LRP-rule to all layers in the model at the given index.
-The index can either be an integer or a tuple of integers to map a rule to a specific layer
-in nested Flux `Chain`s.
+Composite primitive that maps an LRP-rule to the layer in the model addressed
+by `index`, a `Functors.KeyPath` mirroring the keys of the model's `ps`/`st`
+NamedTuples, e.g. `KeyPath(:layer_2, :layer_3)`. All layers nested under the
+addressed path are matched as well.
+
+For convenience, an integer or tuple of integers can be passed instead,
+addressing Lux's default `layer_i` naming:
+`LayerMap(2, rule) == LayerMap(KeyPath(:layer_2), rule)`.
 
 See [`show_layer_indices`](@ref) to print layer indices and [`Composite`](@ref) for an example.
 """
-struct LayerMap{I<:ModelIndex,R<:AbstractLRPRule} <: AbstractCompositeMap
-    index::I
+struct LayerMap{K<:KeyPath,R<:AbstractLRPRule} <: AbstractCompositeMap
+    index::K
     rule::R
 end
-LayerMap(inds::Union{Integer,Tuple}, rule) = LayerMap(ModelIndex(inds), rule)
+function LayerMap(index::Union{Integer,Tuple}, rule::AbstractLRPRule)
+    LayerMap(keypath(index), rule)
+end
+
+keypath(i::Integer) = KeyPath(Symbol(:layer_, i))
+keypath(inds::Tuple) = KeyPath(map(i -> Symbol(:layer_, i), inds)...)
 
 """
     RangeMap(range, rule)
@@ -167,37 +279,56 @@ function get_type_rule(layer, map)
     end
     return nothing
 end
+# Lux wraps bare functions used as layers in `WrappedFunction`;
+# type maps match either the wrapper or the wrapped function itself.
+# Split-out activations are broadcasts of the activation function,
+# which `wrapped_function` sees through.
+function get_type_rule(layer::WrappedFunction, map)
+    f = wrapped_function(layer)
+    for (T, rule) in map
+        if layer isa T || f isa T
+            return rule
+        end
+    end
+    return nothing
+end
 
 """
     lrp_rules(model, composite)
 
-Apply a composite to obtain LRP-rules for a given Flux model.
+Apply a composite to obtain LRP-rules for a given Lux model,
+returned as a `NamedTuple` mirroring the model's `ps`/`st` structure.
 """
-function lrp_rules(model, c::Composite)
-    indices = chainindices(model)
-    idx_first = first_element(indices)
-    idx_last = last_element(indices)
+function lrp_rules(model::Chain, c::Composite)
+    indices = layer_indices(model)
+    idx_first = first_leaf(indices)
+    idx_last = last_leaf(indices)
+    top_keys = keys(model.layers)
+    # Positional primitives (RangeMap, RangeTypeMap, FirstNTypeMap) refer to
+    # the top-level position of a layer in the model; nested layers inherit
+    # the position of their top-level parent.
+    position(idx::KeyPath) = findfirst(==(idx[1]), top_keys)
 
-    get_rule(r::LayerMap, _, idx) = ifelse(idx ∈ r.index, r.rule, nothing)
+    get_rule(r::LayerMap, _, idx) = keypath_in(idx, r.index) ? r.rule : nothing
     get_rule(r::GlobalMap, _, _idx) = r.rule
-    get_rule(r::RangeMap, _, idx) = ifelse(first(idx) ∈ r.range, r.rule, nothing)
-    get_rule(r::FirstLayerMap, _, idx) = ifelse(idx == idx_first, r.rule, nothing)
-    get_rule(r::LastLayerMap, _, idx) = ifelse(idx == idx_last, r.rule, nothing)
+    get_rule(r::RangeMap, _, idx) = position(idx) ∈ r.range ? r.rule : nothing
+    get_rule(r::FirstLayerMap, _, idx) = idx == idx_first ? r.rule : nothing
+    get_rule(r::LastLayerMap, _, idx) = idx == idx_last ? r.rule : nothing
 
     function get_rule(r::GlobalTypeMap, layer, _idx)
         return get_type_rule(layer, r.map)
     end
     function get_rule(r::RangeTypeMap, layer, idx)
-        return ifelse(first(idx) ∈ r.range, get_type_rule(layer, r.map), nothing)
+        return position(idx) ∈ r.range ? get_type_rule(layer, r.map) : nothing
     end
     function get_rule(r::FirstLayerTypeMap, layer, idx)
-        return ifelse(idx == idx_first, get_type_rule(layer, r.map), nothing)
+        return idx == idx_first ? get_type_rule(layer, r.map) : nothing
     end
     function get_rule(r::LastLayerTypeMap, layer, idx)
-        return ifelse(idx == idx_last, get_type_rule(layer, r.map), nothing)
+        return idx == idx_last ? get_type_rule(layer, r.map) : nothing
     end
     function get_rule(r::FirstNTypeMap, layer, idx)
-        return ifelse(first(idx) ∈ 1:(r.n), get_type_rule(layer, r.map), nothing)
+        return position(idx) ∈ 1:(r.n) ? get_type_rule(layer, r.map) : nothing
     end
 
     # The last rule returned from a composite primitive is assigned to the layer.
@@ -209,7 +340,7 @@ function lrp_rules(model, c::Composite)
         end
         return ZeroRule() # else if no assignment was found, return default rule
     end
-    return chainzip(match_rule, model, indices) # construct ChainTuple of rules
+    return zip_layers(match_rule, model, indices) # construct NamedTuple of rules
 end
 
 """
@@ -220,7 +351,7 @@ Automatically contructs a list of LRP-rules by sequentially applying composite p
 
 # Primitives
 To apply a single rule, use:
-* [`LayerMap`](@ref) to apply a rule to the `n`-th layer of a model
+* [`LayerMap`](@ref) to apply a rule to a layer addressed by its `KeyPath`
 * [`GlobalMap`](@ref) to apply a rule to all layers
 * [`RangeMap`](@ref) to apply a rule to a positional range of layers
 * [`FirstLayerMap`](@ref) to apply a rule to the first layer
@@ -247,7 +378,7 @@ julia> composite = Composite(
            FirstNTypeMap(7, Conv => FlatRule()),
        );
 
-julia> analyzer = LRP(model, composite)
+julia> analyzer = LRP(model, ps, st, composite)
 LRP(
   Conv((3, 3), 3 => 64, relu, pad=1)    => FlatRule(),
   MaxPool((2, 2))                       => EpsilonRule{Float32}(1.0f-6),
@@ -262,7 +393,7 @@ LRP(
   Conv((3, 3), 512 => 512, relu, pad=1) => AlphaBetaRule{Float32}(2.0f0, 1.0f0),
   Conv((3, 3), 512 => 512, relu, pad=1) => AlphaBetaRule{Float32}(2.0f0, 1.0f0),
   MaxPool((2, 2))                       => EpsilonRule{Float32}(1.0f-6),
-  MLUtils.flatten                       => PassRule(),
+  FlattenLayer()                        => PassRule(),
   Dense(25088 => 4096, relu)            => EpsilonRule{Float32}(1.0f-6),
   Dropout(0.5)                          => PassRule(),
   Dense(4096 => 4096, relu)             => EpsilonRule{Float32}(1.0f-6),

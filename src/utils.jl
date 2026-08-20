@@ -10,27 +10,6 @@ end
 stabilize_denom(D::AbstractArray{T}, eps=T(1.0f-9)) where {T} = stabilize_denom.(D, eps)
 
 """
-    safedivide(a, b, [eps = 1f-6])
-
-Elementwise division of two matrices avoiding near zero terms
-in the denominator by replacing them with `± eps`.
-"""
-function safedivide(a::AbstractArray{T}, b::AbstractArray{T}, eps=T(1.0f-9)) where {T}
-    return a ./ stabilize_denom(b, T(eps))
-end
-
-"""
-    drop_batch_index(I)
-
-Drop batch dimension index (last value) from CartesianIndex.
-
-## Example
-julia> drop_batch_index(CartesianIndex(5,3,2))
-CartesianIndex(5, 3)
-"""
-drop_batch_index(C::CartesianIndex) = CartesianIndex(C.I[1:(end - 1)])
-
-"""
     ones_like(x)
 
 Returns array of ones of same shape and type as `x`.
@@ -86,10 +65,5 @@ julia> B = masked_copy(A, mask)
 """
 function masked_copy(A::AbstractArray, mask::AbstractArray)
     size(A) != size(mask) && error("Size of array and mask need to match.")
-    out = similar(A)
-    z = zero(eltype(A))
-    @inbounds for i in CartesianIndices(A)
-        out[i] = ifelse(mask[i], A[i], z)
-    end
-    return out
+    return ifelse.(mask, A, zero(eltype(A)))
 end

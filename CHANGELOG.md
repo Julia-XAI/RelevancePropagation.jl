@@ -1,5 +1,77 @@
 # RelevancePropagation.jl
 
+## Version `v4.0.0`
+This release rewrites the package from Flux.jl/Zygote.jl to
+[Lux.jl](https://lux.csail.mit.edu) and
+[Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl).
+Zygote.jl is unmaintained, and Lux's explicit-parameter design is the model framework with first-class Enzyme support.
+Flux.jl models are no longer supported.
+
+* ![BREAKING][badge-breaking] The API follows Lux's separation of a model from its parameters and states, 
+  as returned by `Lux.setup`:
+  `LRP` analyzers are constructed via `LRP(model, params, states[, rules])`,
+  and the model transformations `flatten_model` and `canonize` take and return `(model, params, states)`. 
+  `strip_softmax` takes and returns only the model.
+* ![BREAKING][badge-breaking] Rules for nested models are assigned as `NamedTuple`s mirroring the nested structure of the model.
+  `ChainTuple`, `ParallelTuple` and `SkipConnectionTuple` were removed.
+  A plain `AbstractVector` of rules is still accepted for flat models.
+* ![BREAKING][badge-breaking] The `LRP` constructor no longer flattens models automatically 
+  and the `flatten` keyword argument was removed.
+  Call `flatten_model` explicitly.
+* ![BREAKING][badge-breaking] `LayerMap` addresses layers by
+  `Functors.KeyPath` instead of `ModelIndex`. 
+  Integers and tuples of integers are converted for convenience.
+* ![BREAKING][badge-breaking] Custom layers must subtype `Lux.AbstractLuxLayer` and follow the Lux layer interface.
+* ![BREAKING][badge-breaking] The custom rule API modifies parameters instead of layers:
+  `modify_layer` was removed in favor of `modify_params(rule, ps)`,
+  which lazily modifies the parameter `NamedTuple` during the backward pass.
+  `modify_weight` and `modify_bias` keep their semantics.
+  Rule compatibility with a layer is declared via `is_compatible(rule, layer, ps)`.
+* ![BREAKING][badge-breaking] Fully custom rules implement the pure function
+  `propagate(rule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)` returning `Rᵏ`,
+  replacing the mutating `lrp!(Rᵏ, rule, layer, modified_layer, aᵏ, Rᵏ⁺¹)`.
+  Activations are split out of rule-carrying layers when the model is wrapped,
+  so `propagate` only ever receives activation-free layers
+  and `zᵏ` is the cached pre-activation.
+* ![BREAKING][badge-breaking] `ZBoxRule` now propagates all three of its terms
+  through the affine part of the layer, matching its documented formula.
+  v3 routed the ``z``- and ``c``-terms through the layer's activation function.
+  For ReLU networks the results coincide wherever the incoming relevance is zero
+  at negative pre-activations (the usual case);
+  in general, relevances on activation-bearing layers can differ from v3.
+* ![Enhancement][badge-enhancement] Activation-only layers
+  (`WrappedFunction`s over supported activation functions, plain or broadcast,
+  as produced by `canonize`) are now recognized by the model checks,
+  matched by composite type maps,
+  and assigned the `PassRule` by the default composites
+  and the rule-free `LRP(model, ps, st)` constructor.
+  Pre-split models thereby produce the same relevances as their fused form.
+* ![BREAKING][badge-breaking] Lux `LayerNorm` differs from Flux `LayerNorm`:
+  its default `dims=Colon()` normalizes over all dimensions including the batch dimension, 
+  and epsilon is placed inside the square root (`(x - μ) / √(σ² + ϵ)`). 
+  `LayerNormRule` follows the layer's configuration, so relevances for "the same" architecture can differ from v3.
+* ![Enhancement][badge-enhancement] The LRP backward pass is implemented as a single Enzyme reverse pass over the model,
+  in which per-layer `EnzymeRules` custom rules replace each layer's true VJP with its LRP rule,
+  propagating relevances as cotangents.
+  The pass runs in Enzyme's split mode:
+  the output relevance seed is written directly into the model output's shadow,
+  so no scalar loss is differentiated — a prerequisite for GPU-array support.
+  Structural backward-pass code for `Chain`, `Parallel` and `SkipConnection` is no longer needed.
+  Rules that don't modify parameters or inputs reuse the pre-activations cached during the forward pass,
+  and the inner VJPs of `Dense`, `Scale`, `Conv`, `ConvTranspose` and pooling layers use hand-written fast paths.
+  Layers without a fast path take a nested split-mode Enzyme pullback
+  whose reverse pass reuses the tape of the forward pass that computed the rule's denominator,
+  so the fallback also runs each modified forward only once.
+* ![Enhancement][badge-enhancement] BatchNorm fusion in `canonize` is now exact: 
+  it uses the layer's running statistics and includes `epsilon`
+  (v3 ignored it). 
+  `affine=false` BatchNorm and `use_bias=false` layers are handled.
+* ![Feature][badge-feature] `flatten_model` can unwrap model wrappers such as Boltz.jl's `Vision.VGG` via the opt-in `unwrap` keyword argument, 
+  e.g. `unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)`.
+* ![Bugfix][badge-bugfix] The LRP model checks now reject `Parallel` and `SkipConnection` layers whose `connection` is not `+`. 
+  The LRP backward pass assumes additive branch combination; previously, 
+  other connections silently produced incorrect relevances.
+
 ## Version `v3.0.0`
 * ![BREAKING][badge-breaking] Update XAIBase interface to `v4`. 
   This adds a field to the `Explanation` return type and removes the `add_batch_dim` keyword argument.
