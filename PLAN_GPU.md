@@ -138,6 +138,28 @@ and will be tested in follow-up work on real hardware.
   the un-canonized `BatchNorm(…, relu)` end-to-end test now routes
   through the fast path and still passes;
   the full cold CPU suite passes with zero reference regeneration.
+- *2026-08-20 (task 5 stage 2 LANDED):* `AlphaBetaRule`/
+  `GeneralizedGammaRule` route both seeds through the two-seed
+  `prepare_vjp2(layer, x, ps, st) -> (z̃, pullback)` with
+  `pullback(s₁, s₂) -> (c₁, c₂)`: fast-path layers close over one
+  hand VJP per seed (unchanged cost and bit-identical results),
+  generic layers take the width-2 `BatchDuplicated` fallback
+  `thunk_vjp2` (`ReverseSplitWidth(ReverseSplitWithPrimal, Val(2))`) —
+  one augmented forward and one batched reverse per α-/ˡ-point,
+  hitting the 4F+2R target (was 6F+4R after stage 1).
+  A new `prepare_vjp2 vs Zygote` testset covers the
+  `Dense`/`Scale`/`Conv`/`ConvTranspose` family, identity variants on
+  the fast path and every activation/conv-config variant through the
+  batched thunk; the full cold CPU suite passes with zero reference
+  regeneration. **New Enzyme limitation found while probing:** batched
+  split mode dies on a *compiler assertion* (`AdjointGenerator.h:6478`,
+  shadow type of `ijl_box_float32`) for layers whose reverse pass boxes
+  scalars — LayerNorm reproduces it — aborting the Julia process
+  (width-1 `thunk_vjp` handles the same layers fine). Unreachable
+  through the two consuming rules, whose `is_compatible` default gates
+  them to weight-carrying layers; custom weight-carrying layers with
+  reduction-style adjoints could still hit it. Added to the task 12
+  upstream reports; documented in `thunk_vjp2`'s docstring.
 
 Nothing about the engine's design blocks GPU arrays —
 the blockers are a missing upstream Enzyme extension,
@@ -609,8 +631,8 @@ Notes per pattern:
   combined mode cannot without recomputation.
 - **`AlphaBetaRule`/`GeneralizedGammaRule`**: the code already exploits
   that the α/β (resp. ˡ/ʳ) variants share weights, routing the second
-  seed through the first variant's `input_vjp`
-  (`src/rules.jl:455-457,472-473,514-515,534-535`).
+  seed through the first variant's point via the two-seed
+  `prepare_vjp2` (landed as task 5 stage 2).
   On the thunk path that is two seeds through **one tape** —
   exactly `BatchDuplicated` width 2: one augmented forward per point,
   one batched reverse with shadows `(sᵅ, sᵝ)`.
@@ -990,12 +1012,12 @@ Ordered by how likely they are to matter:
    **Stage 1 DONE (2026-08-19)** — see the status entry above;
    removed the double forward on the fallback path and the last
    `Active` scalar below the engine.
-   Stage 2, optional and separable, remains open:
-   width-2 `BatchDuplicated` tapes for
-   `AlphaBetaRule`/`GeneralizedGammaRule`
-   (their second seed currently takes one-shot `input_vjp`s).
-   Acceptance unchanged: the CPU test suite is bit-identical
-   (the width-2 pattern measured exact on `Dense`, `probe5.jl`).
+   **Stage 2 DONE (2026-08-20)** — see the status entry above;
+   width-2 `BatchDuplicated` tapes (`prepare_vjp2`/`thunk_vjp2`) for
+   `AlphaBetaRule`/`GeneralizedGammaRule`, 4F+2R on the fallback.
+   Acceptance held: the CPU test suite is bit-identical.
+   Found and documented an Enzyme batched-mode compiler-assertion
+   abort on boxed-scalar adjoints (LayerNorm-style; task 12).
 6. ~~Broadcast `masked_copy` (`src/utils.jl:66`), keeping the size check~~
    **DONE (2026-08-19)** — bit-identical on CPU.
 7. ~~Make `zbox_input` allocate through the input
@@ -1027,6 +1049,13 @@ Ordered by how likely they are to matter:
     Metal.jl — `make_zero` aliasing, `EnzymeCoreExt` request (blocker 1);
     Enzyme.jl — `objc_msgSend` on Metal, no `mkcontext` for
     KernelAbstractions' `JLBackend` (blocker 2);
+    Enzyme.jl — batched split mode (`ReverseSplitWidth` +
+    `BatchDuplicated`) hits `Assertion failed:
+    (invertedReturn->getType() == gutils->getShadowType(call.getType()))`
+    (`AdjointGenerator.h:6478`, on `ijl_box_float32`) and aborts the
+    process when the adjoint boxes scalars; minimal reproducer:
+    width-2 `thunk_vjp2` on `Lux.LayerNorm((6, 6, 3))`, Enzyme
+    v0.13.199 (width-1 works);
     XAIBase.jl — `TopNFeatures` scalar indexing (CRP item above).
     Reactant.jl — a hook for Julia-level `EnzymeRules` during tracing
     (`PLAN_REACTANT.md`, "Paths to Reactant compatibility");

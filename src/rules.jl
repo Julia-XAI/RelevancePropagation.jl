@@ -475,19 +475,18 @@ function propagate(rule::AlphaBetaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ⁺¹)
 
     # The α-variant forwards are prepared so their VJPs reuse the tapes;
     # the crossed bias variants only enter the β-denominator, two plain
-    # forwards. Prepared pullbacks are single-use, so the second seed sᵝ
-    # goes through one-shot `input_vjp`s at the same points.
-    zᵅ⁺, pullbackᵅ⁺ = prepare_vjp(layer, aᵏ⁺, psᵅ⁺, st)
-    zᵅ⁻, pullbackᵅ⁻ = prepare_vjp(layer, aᵏ⁻, psᵅ⁻, st)
+    # forwards. The second seed sᵝ shares the α-points' two-seed pullbacks
+    # (one width-2 batched reverse per tape on the Enzyme fallback),
+    # since the α- and β-variants agree there: Wᵝ⁺ = Wᵅ⁺ and Wᵝ⁻ = Wᵅ⁻.
+    zᵅ⁺, pullbackᵅ⁺ = prepare_vjp2(layer, aᵏ⁺, psᵅ⁺, st)
+    zᵅ⁻, pullbackᵅ⁻ = prepare_vjp2(layer, aᵏ⁻, psᵅ⁻, st)
     zᵝ⁺ = first(apply(layer, aᵏ⁻, psᵝ⁺, st))
     zᵝ⁻ = first(apply(layer, aᵏ⁺, psᵝ⁻, st))
 
     sᵅ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵅ⁺ + zᵅ⁻)
     sᵝ = Rᵏ⁺¹ ./ modify_denominator(rule, zᵝ⁺ + zᵝ⁻)
-    cᵅ⁺ = pullbackᵅ⁺(sᵅ)
-    cᵅ⁻ = pullbackᵅ⁻(sᵅ)
-    cᵝ⁺ = input_vjp(layer, aᵏ⁺, psᵅ⁺, st, sᵝ) # Wᵝ⁺ = Wᵅ⁺
-    cᵝ⁻ = input_vjp(layer, aᵏ⁻, psᵅ⁻, st, sᵝ) # Wᵝ⁻ = Wᵅ⁻
+    cᵅ⁺, cᵝ⁺ = pullbackᵅ⁺(sᵅ, sᵝ)
+    cᵅ⁻, cᵝ⁻ = pullbackᵅ⁻(sᵅ, sᵝ)
 
     T = eltype(aᵏ)
     α = convert(T, rule.α)
@@ -538,10 +537,11 @@ function propagate(rule::GeneralizedGammaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ�
 
     # The ˡ-variant forwards are prepared so their VJPs reuse the tapes;
     # the crossed bias variants only enter the ʳ-denominator, two plain
-    # forwards. Prepared pullbacks are single-use, so the second seed sʳ
-    # goes through one-shot `input_vjp`s at the same points.
-    zˡ⁺, pullbackˡ⁺ = prepare_vjp(layer, aᵏ⁺, psˡ⁺, st)
-    zˡ⁻, pullbackˡ⁻ = prepare_vjp(layer, aᵏ⁻, psˡ⁻, st)
+    # forwards. The second seed sʳ shares the ˡ-points' two-seed pullbacks
+    # (one width-2 batched reverse per tape on the Enzyme fallback),
+    # since the ˡ- and ʳ-variants agree there: Wʳ⁺ = Wˡ⁺ and Wʳ⁻ = Wˡ⁻.
+    zˡ⁺, pullbackˡ⁺ = prepare_vjp2(layer, aᵏ⁺, psˡ⁺, st)
+    zˡ⁻, pullbackˡ⁻ = prepare_vjp2(layer, aᵏ⁻, psˡ⁻, st)
     zʳ⁺ = first(apply(layer, aᵏ⁻, psʳ⁺, st))
     zʳ⁻ = first(apply(layer, aᵏ⁺, psʳ⁻, st))
 
@@ -550,10 +550,8 @@ function propagate(rule::GeneralizedGammaRule, layer, aᵏ, zᵏ, ps, st, Rᵏ�
     # with v3's masks on the layer output.
     sˡ = masked_copy(Rᵏ⁺¹, zᵏ .> 0) ./ modify_denominator(rule, zˡ⁺ + zˡ⁻)
     sʳ = masked_copy(Rᵏ⁺¹, zᵏ .< 0) ./ modify_denominator(rule, zʳ⁺ + zʳ⁻)
-    cˡ⁺ = pullbackˡ⁺(sˡ)
-    cˡ⁻ = pullbackˡ⁻(sˡ)
-    cʳ⁺ = input_vjp(layer, aᵏ⁺, psˡ⁺, st, sʳ) # Wʳ⁺ = Wˡ⁺
-    cʳ⁻ = input_vjp(layer, aᵏ⁻, psˡ⁻, st, sʳ) # Wʳ⁻ = Wˡ⁻
+    cˡ⁺, cʳ⁺ = pullbackˡ⁺(sˡ, sʳ)
+    cˡ⁻, cʳ⁻ = pullbackˡ⁻(sˡ, sʳ)
     return @. aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
 end
 

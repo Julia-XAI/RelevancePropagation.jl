@@ -250,6 +250,64 @@ function thunk_vjp(layer, x, ps, st)
 end
 
 """
+    thunk_vjp2(layer, x, ps, st)
+
+Width-2 batched variant of [`thunk_vjp`](@ref)
+and generic fallback of [`prepare_vjp2`](@ref):
+run the augmented forward pass of a width-2 `BatchDuplicated` split-mode thunk,
+returning the primal layer output
+together with a single-use `pullback` closure
+that writes two seeds into the two return shadows
+and computes both VJPs in one batched reverse pass over the tape.
+This is the only way to obtain a second VJP from a split-mode tape:
+re-running a consumed tape is undefined behavior.
+
+!!! warning
+    Enzyme's batched mode cannot compile layers
+    whose reverse pass boxes scalar values,
+    e.g. the reductions of normalization layers —
+    a compiler assertion (`AdjointGenerator.h`) aborts the Julia process.
+    The rules consuming this fallback are restricted to
+    weight-carrying layers, which are unaffected in their common forms;
+    width-1 [`thunk_vjp`](@ref) is not subject to this limitation.
+"""
+function thunk_vjp2(layer, x, ps, st)
+    # The input shadows accumulate the two VJPs and must be freshly zeroed.
+    dx₁ = zero(x)
+    dx₂ = zero(x)
+    fwd, rev = autodiff_thunk(
+        ReverseSplitWidth(ReverseSplitWithPrimal, Val(2)),
+        Const{typeof(model_output)},
+        BatchDuplicated,
+        Const{typeof(layer)},
+        BatchDuplicated{typeof(x),2},
+        Const{typeof(ps)},
+        Const{typeof(st)},
+    )
+    tape, z̃, dz = fwd(
+        Const(model_output),
+        Const(layer),
+        BatchDuplicated(x, (dx₁, dx₂)),
+        Const(ps),
+        Const(st),
+    )
+    function pullback(s₁, s₂)
+        dz[1] .= s₁
+        dz[2] .= s₂
+        rev(
+            Const(model_output),
+            Const(layer),
+            BatchDuplicated(x, (dx₁, dx₂)),
+            Const(ps),
+            Const(st),
+            tape,
+        )
+        return dx₁, dx₂
+    end
+    return z̃, pullback
+end
+
+"""
     prepare_vjp(layer, x, ps, st)
 
 Run the forward pass of `layer` at `x` and return the layer output `z̃`
@@ -263,8 +321,8 @@ forward pass — so obtaining both the layer output and the VJP costs a
 single forward pass either way.
 Each `pullback` must be called at most once:
 re-running a consumed split-mode tape is undefined behavior.
-Rules needing VJPs with several seeds at the same point call
-[`input_vjp`](@ref) once per additional seed.
+Rules needing VJPs with two seeds at the same point
+use [`prepare_vjp2`](@ref) instead.
 """
 prepare_vjp(layer, x, ps, st) = thunk_vjp(layer, x, ps, st)
 
@@ -280,6 +338,31 @@ end
 function prepare_vjp(layer::BatchNorm, x, ps, st)
     batchnorm_is_affine(layer, st) || return thunk_vjp(layer, x, ps, st)
     return first(apply(layer, x, ps, st)), s -> input_vjp(layer, x, ps, st, s)
+end
+
+"""
+    prepare_vjp2(layer, x, ps, st)
+
+Two-seed variant of [`prepare_vjp`](@ref):
+return the layer output `z̃`
+together with a single-use `pullback` closure computing two VJPs
+w.r.t. the input `x` at once — `pullback(s₁, s₂)` returns both VJPs.
+
+Layers with an [`input_vjp`](@ref) fast path apply the layer
+and close over one hand-written VJP per seed;
+everything else takes the width-2 batched Enzyme fallback
+[`thunk_vjp2`](@ref), which computes both VJPs
+in one augmented forward and one batched reverse pass.
+Consumed by the rules needing VJPs with two different seeds
+at the same point ([`AlphaBetaRule`](@ref), [`GeneralizedGammaRule`](@ref)),
+which their compatibility checks restrict to weight-carrying layers.
+"""
+prepare_vjp2(layer, x, ps, st) = thunk_vjp2(layer, x, ps, st)
+
+function prepare_vjp2(layer::Union{Dense,Scale,Conv,ConvTranspose}, x, ps, st)
+    layer.activation === identity || return thunk_vjp2(layer, x, ps, st)
+    pullback(s₁, s₂) = (input_vjp(layer, x, ps, st, s₁), input_vjp(layer, x, ps, st, s₂))
+    return first(apply(layer, x, ps, st)), pullback
 end
 
 """

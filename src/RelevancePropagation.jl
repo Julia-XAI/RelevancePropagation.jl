@@ -12,8 +12,8 @@ using Lux: NoOpLayer, WrappedFunction
 using LuxCore: LuxCore, apply, testmode # owned by LuxCore, not Lux (ExplicitImports)
 using LuxCore: AbstractLuxWrapperLayer
 
-using Enzyme: autodiff_thunk, ReverseSplitWithPrimal
-using Enzyme: Const, Duplicated, DuplicatedNoNeed
+using Enzyme: autodiff_thunk, ReverseSplitWithPrimal, ReverseSplitWidth
+using Enzyme: Const, Duplicated, DuplicatedNoNeed, BatchDuplicated
 using Enzyme.EnzymeRules: EnzymeRules, RevConfig, AugmentedReturn
 using Enzyme.EnzymeRules: needs_primal, needs_shadow, overwritten
 

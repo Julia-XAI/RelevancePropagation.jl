@@ -162,9 +162,15 @@ Enzyme only as a per-layer Zygote substitute; it was scrapped in review.)
   differentiate itself, fatal on GPU arrays; see PLAN_GPU.md task 5).
   Prepared pullbacks are single-use by contract (re-running a consumed
   tape aborts Julia for some layers, see git history), so multi-seed
-  rules (`AlphaBetaRule`, `GeneralizedGammaRule`) route their second
-  seed through one-shot `input_vjp`s at the same points — with fast
-  paths still FLOP-optimal (4 forwards + 4 transposes for αβ).
+  rules (`AlphaBetaRule`, `GeneralizedGammaRule`) take the two-seed
+  `prepare_vjp2`, whose fallback prepares a width-2 `BatchDuplicated`
+  tape: both seeds share one augmented forward and one batched reverse
+  per point (4F+2R for αβ on the fallback; fast paths still
+  FLOP-optimal, 4 forwards + 4 transposes). Enzyme's batched mode
+  aborts on layers whose reverse pass boxes scalars (e.g. LayerNorm's
+  reductions) — unreachable through these rules, which their
+  compatibility checks gate to weight-carrying layers (PLAN_GPU.md,
+  task 12 upstream reports).
 - **Wrappers take explicit `ps`/`st` arguments, mirroring Lux.**
   `LayerWithRule <: AbstractLuxWrapperLayer{:layer}` is parameter- and
   state-transparent, so the user's `ps`/`st` trees apply to the wrapped
