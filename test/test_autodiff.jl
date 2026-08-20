@@ -1,5 +1,5 @@
 using RelevancePropagation:
-    input_vjp, prepare_vjp, seeded_pullback, remove_activation, PoolingLayer
+    input_vjp, prepare_vjp, prepare_vjp2, seeded_pullback, remove_activation, PoolingLayer
 using Test
 
 using Lux
@@ -84,6 +84,31 @@ end
             z̃, pullback = prepare_vjp(layer, x, ps, st)
             @test z̃ ≈ z_ref
             @test pullback(s) ≈ dx_ref
+        end
+    end
+end
+
+# `prepare_vjp2` computes two VJPs at the same point: on the fast paths as one
+# hand-written VJP per seed, on the Enzyme fallback through one width-2
+# `BatchDuplicated` tape (one augmented forward, one batched reverse).
+# The consuming rules are gated to weight-carrying layers, so the testset
+# covers the `Dense`/`Scale`/`Conv`/`ConvTranspose` family: the identity
+# variants take the fast path, the activation variants the batched fallback.
+@testset "prepare_vjp2 vs Zygote" begin
+    for (name, layer, x) in LAYERS
+        layer isa Union{Dense,Scale,Conv,ConvTranspose} || continue
+        @testset "$name" begin
+            ps, st = setup_testmode(layer)
+            z_ref, back_ref = Zygote.pullback(
+                x -> first(LuxCore.apply(layer, x, ps, st)), x
+            )
+            s₁ = randn(StableRNG(17), Float32, size(z_ref)...)
+            s₂ = randn(StableRNG(18), Float32, size(z_ref)...)
+            z̃, pullback = prepare_vjp2(layer, x, ps, st)
+            c₁, c₂ = pullback(s₁, s₂)
+            @test z̃ ≈ z_ref
+            @test c₁ ≈ only(back_ref(s₁))
+            @test c₂ ≈ only(back_ref(s₂))
         end
     end
 end

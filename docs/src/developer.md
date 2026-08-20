@@ -251,13 +251,16 @@ one forward pass in total, and no scalar loss anywhere.
 ```@docs
 RelevancePropagation.input_vjp
 RelevancePropagation.prepare_vjp
+RelevancePropagation.prepare_vjp2
 RelevancePropagation.thunk_vjp
+RelevancePropagation.thunk_vjp2
 RelevancePropagation.seeded_pullback
 ```
 
-Rules that require several VJPs with different seeds at the same point,
-like [`AlphaBetaRule`](@ref), consume their prepared `pullback` for the
-first seed and call `input_vjp` once per additional seed.
+Rules that require VJPs with two different seeds at the same point,
+like [`AlphaBetaRule`](@ref), use the two-seed variant `prepare_vjp2`:
+on the Enzyme fallback it prepares a width-2 `BatchDuplicated` tape,
+so both VJPs share one augmented forward and one batched reverse pass.
 
 ### Specialized implementations
 In other programming languages, LRP is commonly implemented in an object-oriented manner,
