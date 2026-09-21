@@ -1,5 +1,16 @@
 # RelevancePropagation.jl
 
+## Version `v4.0.0`
+* ![BREAKING][badge-breaking] Update XAIBase interface to `v5`.
+  `LRP` and `CRP` now return an `Attribution` instead of an `Explanation`,
+  using `SumPooling()` to preserve relevance conservation when pooling over the feature dimension.
+  Refer to the [XAIBase.jl changelog](https://github.com/Julia-XAI/XAIBase.jl/blob/main/CHANGELOG.md#version-v500) for more information ([#25])
+* ![BREAKING][badge-breaking] Update to Flux `v0.16.12` and Zygote `v0.7` ([#25])
+* ![Bugfix][badge-bugfix] Preserve the `pad_mode` of `Conv` and `CrossCor` layers in `canonize` and `modify_layer` ([#25])
+* ![Bugfix][badge-bugfix] Fix method ambiguities of `first`, `last` and `==` on `ChainTuple`, `ParallelTuple`, `SkipConnectionTuple` and `ModelIndex` ([#25])
+* ![Maintenance][badge-maintenance] Fix type instabilities of LRP rules with custom `lrp!` implementations ([#25])
+* ![Maintenance][badge-maintenance] Test with JET.jl and `XAIBase.test_interface` ([#25])
+
 ## Version `v3.0.0`
 * ![BREAKING][badge-breaking] Update XAIBase interface to `v4`.
   This adds a field to the `Explanation` return type and removes the `add_batch_dim` keyword argument.
@@ -51,6 +62,7 @@ Initial release of RelevancePropagation.jl.
 ![Documentation][badge-docs]
 -->
 
+[#25]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/25
 [#22]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/22
 [#19]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/19
 [#14]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/14
