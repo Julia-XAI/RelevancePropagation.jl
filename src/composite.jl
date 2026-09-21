@@ -216,7 +216,7 @@ end
     Composite(primitives...)
     Composite(default_rule, primitives...)
 
-Automatically contructs a list of LRP-rules by sequentially applying composite primitives.
+Automatically constructs a list of LRP-rules by sequentially applying composite primitives.
 
 # Primitives
 To apply a single rule, use:

@@ -78,7 +78,7 @@ model(x)
 Flux.testmode!(model, true)
 model_canonized = canonize(model)
 
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 9 # 15 - 6
 @test model(x) ≈ model_canonized(x)
 
@@ -103,7 +103,7 @@ model(x)
 Flux.testmode!(model, true)
 model_canonized = canonize(model)
 
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 4
 @test model(x) ≈ model_canonized(x)
 

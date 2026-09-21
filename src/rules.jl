@@ -572,9 +572,9 @@ function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, R�
     @. Rᵏ = aᵏ * (s - μₛ)
 end
 
-#=========================#
-# Perfomance improvements #
-#=========================#
+#==========================#
+# Performance improvements #
+#==========================#
 
 # The following functions aren't strictly necessary – tests still pass when removing them.
 # However they improve performance on specific combinations of rule and layer types.

@@ -101,7 +101,7 @@ model = Chain(Dense(784, 100, myrelu), Dense(100, 10));
 # ERROR: Unknown layer or activation function found in model
 # ```
 
-# Registation works by defining the function [`LRP_CONFIG.supports_activation`](@ref) as `true`:
+# Registration works by defining the function [`LRP_CONFIG.supports_activation`](@ref) as `true`:
 LRP_CONFIG.supports_activation(::typeof(myrelu)) = true
 
 # now the analyzer can be created without error:

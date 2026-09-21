@@ -146,7 +146,7 @@ function lrp!(
     aᵏ⁺¹_layers = sc.layers(aᵏ)
     c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # using aᵏ = aᵏ⁺¹_skip
 
-    # Distribute relevance accoring to contribution to output activation
+    # Distribute relevance according to contribution to output activation
     # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
     Rᵏ⁺¹_layers = c .* aᵏ⁺¹_layers
     Rᵏ_skip = c .* aᵏ  # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip

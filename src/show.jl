@@ -84,18 +84,18 @@ end
 
 function print_layer_check(io, l)
     layer_failed = !lrp_check_layer_type(l)
-    activ_failed = !lrp_check_activation(l)
-    activ = activation_fn(l)
+    activation_failed = !lrp_check_activation(l)
+    σ = activation_fn(l)
 
-    if layer_failed && activ_failed
+    if layer_failed && activation_failed
         return printstyled(
             io,
-            "unsupported or unknown activation function $activ and layer type";
+            "unsupported or unknown activation function $σ and layer type";
             color=COLOR_CHECK_FAIL,
         )
-    elseif activ_failed
+    elseif activation_failed
         return printstyled(
-            io, "unsupported or unknown activation function $activ"; color=COLOR_CHECK_FAIL
+            io, "unsupported or unknown activation function $σ"; color=COLOR_CHECK_FAIL
         )
     elseif layer_failed
         return printstyled(io, "unknown layer type"; color=COLOR_CHECK_FAIL)
