@@ -1,13 +1,11 @@
 using RelevancePropagation
 
 using Test
-using JuliaFormatter
-using Aqua
 
 @testset verbose = true "RelevancePropagation.jl" begin
     @testset verbose = true "Linting" begin
         @info "Testing linting..."
-        include("test_linting.jl")
+        include("linting.jl")
     end
     @testset "Utilities" begin
         @info "Testing utilities..."

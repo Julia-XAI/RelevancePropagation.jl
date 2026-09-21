@@ -1,8 +1,11 @@
 # RelevancePropagation.jl
 
-| **Documentation** | **Build Status** |
-|:----------------- |:---------------- |
-| [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url] | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url] [![Aqua QA][aqua-img]][aqua-url] |
+|               |                                                                                                                         |
+|:--------------|:------------------------------------------------------------------------------------------------------------------------|
+| Documentation | [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url]           |
+| Build Status  | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url]                                        |
+| Testing       | [![Aqua][aqua-img]][aqua-url] [![JET][jet-img]][jet-url]                                                                |
+| Code Style    | [![Code Style: Blue][blue-img]][blue-url]                                                                               |
 
 Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP)
 and [Concept Relevance Propagation][paper-crp] (CRP)
@@ -109,3 +112,7 @@ whereas regions in blue are of negative relevance.
 [codecov-url]: https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl
 [aqua-img]: https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg
 [aqua-url]: https://github.com/JuliaTesting/Aqua.jl
+[jet-img]: https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a
+[jet-url]: https://github.com/aviatesk/JET.jl
+[blue-img]: https://img.shields.io/badge/code%20style-blue-4495d1.svg
+[blue-url]: https://github.com/invenia/BlueStyle
