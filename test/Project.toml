@@ -19,5 +19,6 @@ XAIBase = "9b48221d-a747-4c1b-9860-46a1d8ba24a7"
 
 [compat]
 Aqua = "0.8"
+BenchmarkTools = "~1.6"
 ExplicitImports = "1"
 JET = "0.11, 0.12"

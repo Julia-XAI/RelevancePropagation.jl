@@ -102,5 +102,14 @@ function canonize_fuse(c::Conv, bn::BatchNorm)
     else
         -scale .* bn.μ + bn.β
     end
-    return Conv(bn.λ, W, b, c.stride, c.pad, c.dilation, c.groups)
+    return Conv(
+        W,
+        b,
+        bn.λ;
+        stride=c.stride,
+        pad=c.pad,
+        pad_mode=c.pad_mode,
+        dilation=c.dilation,
+        groups=c.groups,
+    )
 end

@@ -347,6 +347,7 @@ function lrp!(Rᵏ, rule::ZBoxRule, layer, modified_layers, aᵏ, Rᵏ⁺¹)
     c⁺ = only(back⁺(s))
     c⁻ = only(back⁻(s))
     @. Rᵏ = aᵏ * c - l * c⁺ - h * c⁻
+    return Rᵏ
 end
 
 zbox_input(in::AbstractArray{T}, c::Real) where {T} = fill(convert(T, c), size(in))
@@ -419,6 +420,7 @@ function lrp!(Rᵏ, rule::AlphaBetaRule, _layer, modified_layers, aᵏ, Rᵏ⁺�
     α = convert(T, rule.α)
     β = convert(T, rule.β)
     @. Rᵏ = α * (aᵏ⁺ * cᵅ⁺ + aᵏ⁻ * cᵅ⁻) - β * (aᵏ⁺ * cᵝ⁻ + aᵏ⁻ * cᵝ⁺)
+    return Rᵏ
 end
 
 """
@@ -458,6 +460,7 @@ function lrp!(Rᵏ, rule::ZPlusRule, _layer, modified_layers, aᵏ, Rᵏ⁺¹)
     c⁺ = only(back⁺(s))
     c⁻ = only(back⁻(s))
     @. Rᵏ = aᵏ⁺ * c⁺ + aᵏ⁻ * c⁻
+    return Rᵏ
 end
 
 """
@@ -518,6 +521,7 @@ function lrp!(Rᵏ, rule::GeneralizedGammaRule, layer, modified_layers, aᵏ, R�
     cʳ⁺ = only(back⁺(sʳ))
     cʳ⁻ = only(back⁻(sʳ))
     @. Rᵏ = aᵏ⁺ * (cˡ⁺ + cʳ⁻) + aᵏ⁻ * (cˡ⁻ + cʳ⁺)
+    return Rᵏ
 end
 
 """
@@ -553,6 +557,7 @@ function lrp!(
     s = @. Rᵏ⁺¹ / stabilize_denom(aᵏ - μₐ, LRP_DEFAULT_STABILIZER)
     μₛ = mean(s; dims=n_dims)
     @. Rᵏ = aᵏ * (s - μₛ)
+    return Rᵏ
 end
 
 function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, Rᵏ⁺¹)
@@ -570,6 +575,7 @@ function lrp!(Rᵏ, ::LayerNormRule, layer::LayerNorm, _modified_layer, aᵏ, R�
     s = @. Rᵏ / stabilize_denom(z, LRP_DEFAULT_STABILIZER)
     μₛ = mean(s; dims=n_dims)
     @. Rᵏ = aᵏ * (s - μₛ)
+    return Rᵏ
 end
 
 #==========================#
@@ -593,4 +599,5 @@ function lrp!(Rᵏ, _rule::FlatRule, _layer::Dense, _modified_layer, _aᵏ, Rᵏ
     for i in axes(Rᵏ, 2) # samples in batch
         fill!(view(Rᵏ, :, i), sum(view(Rᵏ⁺¹, :, i)) / n)
     end
+    return Rᵏ
 end
