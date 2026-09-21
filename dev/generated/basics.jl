@@ -48,7 +48,7 @@ analyzer = LRP(model, composite)
 
 heatmap(input, analyzer)
 
-expl = analyze(input, analyzer; layerwise_relevances=true)
-expl.extras.layerwise_relevances
+attr = analyze(input, analyzer; layerwise_relevances=true)
+attr.extras.layerwise_relevances
 
 # This file was generated using Literate.jl, https://github.com/fredrikekre/Literate.jl

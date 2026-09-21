@@ -99,9 +99,9 @@ convert2image(MNIST, x)
 # By default, the `LRP` constructor will assign the [`ZeroRule`](@ref) to all layers.
 analyzer = LRP(model)
 
-# This ana lyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
+# This analyzer will return heatmaps that look identical to the `InputTimesGradient` analyzer
 # from [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
-# We can visualize `Explanation`s by computing a `heatmap` using either
+# We can visualize `Attribution`s by computing a `heatmap` using either
 # [VisionHeatmaps.jl](https://julia-xai.github.io/XAIDocs/VisionHeatmaps/stable/) or
 # [TextHeatmaps.jl](https://julia-xai.github.io/XAIDocs/TextHeatmaps/stable/),
 # either for images or text, respectively.
@@ -131,10 +131,10 @@ heatmap(input, analyzer)
 # `layerwise_relevances=true`.
 #
 # The layerwise relevances can be accessed in the `extras` field
-# of the returned `Explanation`:
+# of the returned `Attribution`:
 
-expl = analyze(input, analyzer; layerwise_relevances=true)
-expl.extras.layerwise_relevances
+attr = analyze(input, analyzer; layerwise_relevances=true)
+attr.extras.layerwise_relevances
 
 # Note that the layerwise relevances are only kept for layers in the outermost `Chain` of the model.
 # Since we used a flattened model, we obtained all relevances.
@@ -159,18 +159,18 @@ expl.extras.layerwise_relevances
 # # analyzers don't require calling `gpu`
 # analyzer = LRP(model)
 #
-# # explanations are computed on the GPU
-# expl = analyze(input, analyzer)
+# # feature attributions are computed on the GPU
+# attr = analyze(input, analyzer)
 # ```
 
-# Some operations, like saving, require moving explanations back to the CPU.
+# Some operations, like saving, require moving feature attributions back to the CPU.
 # This can be done using Flux's `cpu` function:
 
 # ```julia
-# val = expl.val |> cpu # or cpu(expl.val)
+# val = attr.val |> cpu # or cpu(attr.val)
 #
 # using BSON
-# BSON.@save "explanation.bson" val
+# BSON.@save "attribution.bson" val
 # ```
 #
 # ### Using LRP without a GPU

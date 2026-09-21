@@ -28,7 +28,7 @@ composite = EpsilonPlusFlat()
 lrp_analyzer = LRP(model, composite)
 
 # ## Step 2: Define concepts
-# Then, specify the index of the layer on the outputs of which you want to condition the explanation.
+# Then, specify the index of the layer on the outputs of which you want to condition the attribution.
 # In this example, we are interested in the outputs of the last convolutional layer, layer 3:
 feature_layer = 3    # index of relevant layer in model
 model[feature_layer] # show layer
@@ -52,8 +52,8 @@ analyzer = CRP(lrp_analyzer, feature_layer, features)
 heatmap(input, analyzer)
 
 # ## Using CRP on input batches
-# Note that `CRP` uses the batch dimension to return explanations.
-# When using CRP on batches, the explanations are first sorted by features, then inputs,
+# Note that `CRP` uses the batch dimension to return concept attributions.
+# When using CRP on batches, the attributions are first sorted by features, then inputs,
 # e.g. `[c1_i1, c1_i2, c2_i1, c2_i2, c3_i1, c3_i2]` in the following example:
 x, y = MNIST(Float32, :test)[10:11]
 batch = reshape(x, 28, 28, 1, :)
