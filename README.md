@@ -4,21 +4,21 @@
 |:----------------- |:---------------- |
 | [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url] | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url] [![Aqua QA][aqua-img]][aqua-url] |
 
-Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
-and [Concept Relevance Propagation][paper-crp] (CRP) 
+Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP)
+and [Concept Relevance Propagation][paper-crp] (CRP)
 for use with [Flux.jl](https://fluxml.ai) models.
 
 This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
 [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
 
-## Installation 
-This package supports Julia ≥1.10. To install it, open the Julia REPL and run 
+## Installation
+This package supports Julia ≥1.10. To install it, open the Julia REPL and run
 ```julia-repl
 julia> ]add RelevancePropagation
 ```
 
 ## Example
-Let's use LRP to explain why an image of a castle gets classified as such 
+Let's use LRP to explain why an image of a castle gets classified as such
 using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Metalhead.jl):
 
 ![][castle]
@@ -39,7 +39,7 @@ model = canonize(model)
 
 # Load input
 url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
-img = load(url) 
+img = load(url)
 
 # Preprocess input
 mean = (0.485f0, 0.456f0, 0.406f0)
@@ -55,15 +55,15 @@ expl = analyze(input, analyzer)  # or: expl = analyzer(input)
 heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
 ```
 
-We can also get an explanation for the activation of the output neuron 
+We can also get an explanation for the activation of the output neuron
 corresponding to the "street sign" class by specifying the corresponding output neuron position `920`:
 
 ```julia
-analyze(input, analyzer, 920) 
+analyze(input, analyzer, 920)
 ```
 
-Heatmaps for all implemented analyzers are shown in the following table. 
-Red color indicate regions of positive relevance towards the selected class, 
+Heatmaps for all implemented analyzers are shown in the following table.
+Red color indicate regions of positive relevance towards the selected class,
 whereas regions in blue are of negative relevance.
 
 | **Analyzer**                                  | **Heatmap for class "castle"** |**Heatmap for class "street sign"** |
@@ -76,7 +76,7 @@ whereas regions in blue are of negative relevance.
 | `LRP` with `ZeroRule` (discouraged)           | ![][castle-lrp]                | ![][streetsign-lrp]                |
 
 ## Acknowledgements
-> Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF) 
+> Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF)
 > for the Berlin Institute for the Foundations of Learning and Data (BIFOLD) (01IS18037A).
 
 <!-- References -->
