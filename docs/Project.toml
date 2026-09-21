@@ -13,4 +13,5 @@ RelevancePropagation = "0be6dd02-ae9e-43eb-b318-c6e81d6890d8"
 VisionHeatmaps = "27106da1-f8bc-4ca8-8c66-9b8289f1e035"
 
 [compat]
-VisionHeatmaps = "1.4"
+Flux = ">=0.16.12"
+VisionHeatmaps = "3"

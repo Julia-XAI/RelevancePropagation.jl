@@ -3,13 +3,13 @@
 All methods in RelevancePropagation.jl work by calling `analyze` on an input and an analyzer:
 ```@docs
 analyze
-Explanation
+Attribution
 ```
 
 For heatmapping functionality, take a look at either
 [VisionHeatmaps.jl](https://julia-xai.github.io/XAIDocs/VisionHeatmaps/stable/) or
 [TextHeatmaps.jl](https://julia-xai.github.io/XAIDocs/TextHeatmaps/stable/).
-Both provide `heatmap` methods for visualizing explanations, 
+Both provide `heatmap` methods for visualizing attributions,
 either for images or text, respectively.
 
 ## LRP analyzer
@@ -25,7 +25,7 @@ flatten_model
 ```
 
 ## LRP rules
-Refer to the [LRP rule overview](@ref rules) for a detailed explanation 
+Refer to the [LRP rule overview](@ref rules) for a detailed explanation
 of the notation used for LRP rules.
 
 ```@docs
@@ -60,7 +60,7 @@ FirstLayerMap
 LastLayerMap
 ```
 
-To apply `LayerMap` to nested Flux Chains or `Parallel` layers, 
+To apply `LayerMap` to nested Flux Chains or `Parallel` layers,
 make use of `show_layer_indices`:
 ```@docs
 show_layer_indices
@@ -96,7 +96,7 @@ EpsilonAlpha2Beta1Flat
 ```
 
 ### Manual rule assignment
-For [manual rule assignment](@ref composites-manual), use `ChainTuple`, 
+For [manual rule assignment](@ref composites-manual), use `ChainTuple`,
 `ParallelTuple` and `SkipConnectionTuple`, matching the model structure:
 ```@docs
 ChainTuple
@@ -104,9 +104,9 @@ ParallelTuple
 SkipConnectionTuple
 ```
 
-## Custom rules 
+## Custom rules
 These utilities can be used to define custom rules without writing boilerplate code.
-To extend these functions, explicitly `import` them: 
+To extend these functions, explicitly `import` them:
 ```@docs
 RelevancePropagation.modify_input
 RelevancePropagation.modify_denominator

@@ -32,6 +32,11 @@ for T in (Conv, ConvTranspose, CrossCor)
     @test l2.bias ≈ 0.1 * l1.bias
     @test activation_fn(l2) == gelu
 end
+for T in (Conv, CrossCor)
+    l1 = T((3, 3), 3 => 2, relu; pad=1, pad_mode=:circular)
+    l2 = copy_layer(l1, l1.weight, l1.bias)
+    @test l2.pad_mode == :circular
+end
 
 # flatten_model
 @test flatten_model(Chain(Chain(Chain(abs)), sqrt, Chain(relu))) == Chain(abs, sqrt, relu)

@@ -34,7 +34,16 @@ defaulting to `identity`.
 copy_layer(::Dense, W, b; σ=identity) = Dense(W, b, σ)
 copy_layer(::Scale, W, b; σ=identity) = Scale(W, b, σ)
 function copy_layer(l::Conv, W, b; σ=identity)
-    return Conv(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation, groups=l.groups)
+    return Conv(
+        W,
+        b,
+        σ;
+        stride=l.stride,
+        pad=l.pad,
+        pad_mode=l.pad_mode,
+        dilation=l.dilation,
+        groups=l.groups,
+    )
 end
 function copy_layer(l::ConvTranspose, W, b; σ=identity)
     return ConvTranspose(
@@ -42,5 +51,7 @@ function copy_layer(l::ConvTranspose, W, b; σ=identity)
     )
 end
 function copy_layer(l::CrossCor, W, b; σ=identity)
-    return CrossCor(W, b, σ; stride=l.stride, pad=l.pad, dilation=l.dilation)
+    return CrossCor(
+        W, b, σ; stride=l.stride, pad=l.pad, pad_mode=l.pad_mode, dilation=l.dilation
+    )
 end

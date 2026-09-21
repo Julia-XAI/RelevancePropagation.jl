@@ -71,7 +71,9 @@ function call_analyzer(
     mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
-    return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
+    return Attribution(
+        first(Rs), input, last(as), ns(last(as)), SumPooling(); extras=extras
+    )
 end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)
@@ -146,7 +148,7 @@ function lrp!(
     aᵏ⁺¹_layers = sc.layers(aᵏ)
     c = Rᵏ⁺¹ ./ stabilize_denom(aᵏ⁺¹_layers + aᵏ) # using aᵏ = aᵏ⁺¹_skip
 
-    # Distribute relevance accoring to contribution to output activation
+    # Distribute relevance according to contribution to output activation
     # For the skip connection, relevances stay constant: Rᵏ_skip = Rᵏ⁺¹_skip
     Rᵏ⁺¹_layers = c .* aᵏ⁺¹_layers
     Rᵏ_skip = c .* aᵏ  # same as Rᵏ⁺¹_skip = c .* aᵏ⁺¹_skip

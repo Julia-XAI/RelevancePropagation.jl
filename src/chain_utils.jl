@@ -53,15 +53,11 @@ for T in (:ChainTuple, :ParallelTuple, :SkipConnectionTuple)
         ($T)(xs...) = ($T)(xs)
 
         @forward $T.vals Base.getindex,
-        Base.length,
-        Base.first,
-        Base.last,
-        Base.iterate,
-        Base.lastindex,
-        Base.keys,
-        Base.firstindex,
-        Base.:(==)
-        Base.similar
+        Base.length, Base.iterate, Base.lastindex, Base.keys,
+        Base.firstindex
+
+        Base.first(t::$T) = first(t.vals)
+        Base.last(t::$T) = last(t.vals)
 
         # Containers are equivalent if fields are equivalent
         Base.:(==)(a::$T, b::$T) = a.vals == b.vals

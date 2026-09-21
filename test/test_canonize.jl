@@ -48,6 +48,17 @@ Flux.testmode!(model, true)
 conv_fused = @inferred canonize_fuse(conv, bn_conv)
 @test conv_fused(x) ≈ model(x)
 
+# Fusion preserves non-default padding modes
+conv = Conv((3, 3), 3 => 4; pad=1, pad_mode=:circular, init=pseudorand)
+model = Chain(conv, bn_conv)
+Flux.testmode!(model, false)
+model(x)
+Flux.testmode!(model, true)
+
+conv_fused = canonize_fuse(conv, bn_conv)
+@test conv_fused.pad_mode == :circular
+@test conv_fused(x) ≈ model(x)
+
 ##=====================================#
 # Test `canonize` on sequential models #
 #======================================#
@@ -78,7 +89,7 @@ model(x)
 Flux.testmode!(model, true)
 model_canonized = canonize(model)
 
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 9 # 15 - 6
 @test model(x) ≈ model_canonized(x)
 
@@ -103,7 +114,7 @@ model(x)
 Flux.testmode!(model, true)
 model_canonized = canonize(model)
 
-# 6 of the BatchNorm layers should be removed and the ouputs should match
+# 6 of the BatchNorm layers should be removed and the outputs should match
 @test length(model_canonized) == 4
 @test model(x) ≈ model_canonized(x)
 

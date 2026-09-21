@@ -3,7 +3,7 @@ module RelevancePropagation
 using Base.Iterators
 using Reexport: @reexport
 import XAIBase: call_analyzer
-using XAIBase: XAIBase, AbstractXAIMethod, Explanation
+using XAIBase: XAIBase, AbstractXAIMethod, Attribution, SumPooling
 using XAIBase: AbstractOutputSelector, AbstractFeatureSelector, number_of_features
 
 using MacroTools: @forward

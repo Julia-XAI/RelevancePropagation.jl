@@ -13,14 +13,10 @@ Base.show(io::IO, mi::ModelIndex) = Base.show(io, mi.inds)
 Base.show(io::IO, mi::ModelIndex{1}) = Base.show(io, only(mi.inds))
 
 Base.:(==)(a::ModelIndex, b::ModelIndex) = a.inds == b.inds
+Base.first(mi::ModelIndex) = first(mi.inds)
+Base.last(mi::ModelIndex) = last(mi.inds)
 @forward ModelIndex.inds Base.getindex,
-Base.length,
-Base.first,
-Base.last,
-Base.iterate,
-Base.lastindex,
-Base.keys,
-Base.firstindex,
+Base.length, Base.iterate, Base.lastindex, Base.keys, Base.firstindex,
 Base.similar
 
 # in(ModelIndex(1, 2),    ModelIndex(1))       -> true

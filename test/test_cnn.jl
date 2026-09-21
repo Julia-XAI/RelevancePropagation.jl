@@ -45,19 +45,19 @@ function test_cnn(name, method)
             analyzer = method(model)
             println("Timing $name...")
             print("cold:")
-            @time expl = analyze(input, analyzer)
+            @time attr = analyze(input, analyzer)
 
-            @test size(expl.val) == size(input)
-            @test_reference "references/cnn/$(name)_max.jld2" Dict("expl" => expl.val) by =
+            @test size(attr.val) == size(input)
+            @test_reference "references/cnn/$(name)_max.jld2" Dict("expl" => attr.val) by =
                 (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
         end
         @testset "Neuron selection" begin
             analyzer = method(model)
             print("warm:")
-            @time expl = analyze(input, analyzer, 1)
+            @time attr = analyze(input, analyzer, 1)
 
-            @test size(expl.val) == size(input)
-            @test_reference "references/cnn/$(name)_ns1.jld2" Dict("expl" => expl.val) by =
+            @test size(attr.val) == size(input)
+            @test_reference "references/cnn/$(name)_ns1.jld2" Dict("expl" => attr.val) by =
                 (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
         end
     end
@@ -80,18 +80,18 @@ end
     @testset "Max activation" begin
         println("Timing CRP...")
         print("cold:")
-        @time expl = analyze(input, analyzer)
+        @time attr = analyze(input, analyzer)
 
-        @test size(expl.val) == size(input) .* (1, 1, 1, n_features)
-        @test_reference "references/cnn/CRP_max.jld2" Dict("expl" => expl.val) by =
+        @test size(attr.val) == size(input) .* (1, 1, 1, n_features)
+        @test_reference "references/cnn/CRP_max.jld2" Dict("expl" => attr.val) by =
             (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
     end
     @testset "Neuron selection" begin
         print("warm:")
-        @time expl = analyze(input, analyzer, 1)
+        @time attr = analyze(input, analyzer, 1)
 
-        @test size(expl.val) == size(input) .* (1, 1, 1, n_features)
-        @test_reference "references/cnn/CRP_ns1.jld2" Dict("expl" => expl.val) by =
+        @test size(attr.val) == size(input) .* (1, 1, 1, n_features)
+        @test_reference "references/cnn/CRP_ns1.jld2" Dict("expl" => attr.val) by =
             (r, a) -> isapprox(r["expl"], a["expl"]; rtol=0.05)
     end
 end

@@ -1,31 +1,34 @@
 # RelevancePropagation.jl
 
-| **Documentation** | **Build Status** |
-|:----------------- |:---------------- |
-| [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url] | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url] [![Aqua QA][aqua-img]][aqua-url] |
+|               |                                                                                                                         |
+|:--------------|:------------------------------------------------------------------------------------------------------------------------|
+| Documentation | [![Stable documentation][docs-stab-img]][docs-stab-url] [![Latest documentation][docs-dev-img]][docs-dev-url]           |
+| Build Status  | [![Build Status][ci-img]][ci-url] [![Coverage Status][codecov-img]][codecov-url]                                        |
+| Testing       | [![Aqua][aqua-img]][aqua-url] [![JET][jet-img]][jet-url]                                                                |
+| Code Style    | [![Code Style: Blue][blue-img]][blue-url]                                                                               |
 
-Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
-and [Concept Relevance Propagation][paper-crp] (CRP) 
+Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP)
+and [Concept Relevance Propagation][paper-crp] (CRP)
 for use with [Flux.jl](https://fluxml.ai) models.
 
 This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
 [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
 
-## Installation 
-This package supports Julia ≥1.10. To install it, open the Julia REPL and run 
+## Installation
+This package supports Julia ≥1.10. To install it, open the Julia REPL and run
 ```julia-repl
 julia> ]add RelevancePropagation
 ```
 
 ## Example
-Let's use LRP to explain why an image of a castle gets classified as such 
+Let's use LRP to explain why an image of a castle gets classified as such
 using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Metalhead.jl):
 
 ![][castle]
 
 ```julia
 using RelevancePropagation
-using VisionHeatmaps         # visualization of explanations as heatmaps
+using VisionHeatmaps         # visualization of attributions as heatmaps
 using Flux, Metalhead        # pre-trained vision models in Flux
 using DataAugmentation       # input preprocessing
 using HTTP, FileIO, ImageIO  # load image from URL
@@ -39,7 +42,7 @@ model = canonize(model)
 
 # Load input
 url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
-img = load(url) 
+img = load(url)
 
 # Preprocess input
 mean = (0.485f0, 0.456f0, 0.406f0)
@@ -51,19 +54,19 @@ input = reshape(input.data, 224, 224, 3, :)  # unpack data and add batch dimensi
 # Run XAI method
 composite = EpsilonPlusFlat()
 analyzer = LRP(model, composite)
-expl = analyze(input, analyzer)  # or: expl = analyzer(input)
-heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
+attr = analyze(input, analyzer)  # or: attr = analyzer(input)
+heatmap(attr)                    # show heatmap using VisionHeatmaps.jl
 ```
 
-We can also get an explanation for the activation of the output neuron 
+We can also compute a feature attribution for the activation of the output neuron
 corresponding to the "street sign" class by specifying the corresponding output neuron position `920`:
 
 ```julia
-analyze(input, analyzer, 920) 
+analyze(input, analyzer, 920)
 ```
 
-Heatmaps for all implemented analyzers are shown in the following table. 
-Red color indicate regions of positive relevance towards the selected class, 
+Heatmaps for all implemented analyzers are shown in the following table.
+Red color indicate regions of positive relevance towards the selected class,
 whereas regions in blue are of negative relevance.
 
 | **Analyzer**                                  | **Heatmap for class "castle"** |**Heatmap for class "street sign"** |
@@ -76,7 +79,7 @@ whereas regions in blue are of negative relevance.
 | `LRP` with `ZeroRule` (discouraged)           | ![][castle-lrp]                | ![][streetsign-lrp]                |
 
 ## Acknowledgements
-> Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF) 
+> Adrian Hill acknowledges support by the Federal Ministry of Education and Research (BMBF)
 > for the Berlin Institute for the Foundations of Learning and Data (BIFOLD) (01IS18037A).
 
 <!-- References -->
@@ -109,3 +112,7 @@ whereas regions in blue are of negative relevance.
 [codecov-url]: https://codecov.io/gh/Julia-XAI/RelevancePropagation.jl
 [aqua-img]: https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/master/badge.svg
 [aqua-url]: https://github.com/JuliaTesting/Aqua.jl
+[jet-img]: https://img.shields.io/badge/%F0%9F%9B%A9%EF%B8%8F_tested_with-JET.jl-233f9a
+[jet-url]: https://github.com/aviatesk/JET.jl
+[blue-img]: https://img.shields.io/badge/code%20style-blue-4495d1.svg
+[blue-url]: https://github.com/invenia/BlueStyle

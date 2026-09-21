@@ -24,7 +24,7 @@ c9 = Chain(SkipConnection(SkipConnection(d1, +), +))
 c10 = Chain(d1, SkipConnection(d2, +))
 c11 = Chain(d1, SkipConnection(Chain(d2, d3), +), d4)
 
-# pre-compute occuring hidden activations, where hXYZ = dX(dY(dZ(x))) = dX(hYZ)
+# pre-compute occurring hidden activations, where hXYZ = dX(dY(dZ(x))) = dX(hYZ)
 h1 = d1(x)
 h11 = d1(h1)
 h21 = d2(h1)

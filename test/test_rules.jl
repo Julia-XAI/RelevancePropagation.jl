@@ -341,14 +341,14 @@ end
 
 ## Test Dense layer
 # Define Dense test input
-din = 4 # input dimension
-dout = 3 # output dimension
+n_in = 4 # input dimension
+n_out = 3 # output dimension
 batchsize = 2
-aᵏ_dense = pseudorandn(din, batchsize)
+aᵏ_dense = pseudorandn(n_in, batchsize)
 
 layers = Dict(
-    "Dense_relu"     => Dense(pseudorandn(dout, din), pseudorandn(dout), relu),
-    "Dense_identity" => Dense(Matrix{Float32}(I, dout, din), false, identity),
+    "Dense_relu"     => Dense(pseudorandn(n_out, n_in), pseudorandn(n_out), relu),
+    "Dense_identity" => Dense(Matrix{Float32}(I, n_out, n_in), false, identity),
 )
 @testset "Dense" begin
     for (rulename, rule) in RULES

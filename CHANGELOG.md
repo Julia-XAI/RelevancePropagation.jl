@@ -1,7 +1,19 @@
 # RelevancePropagation.jl
 
+## Version `v4.0.0`
+* ![BREAKING][badge-breaking] Update XAIBase interface to `v5`.
+  `LRP` and `CRP` now return an `Attribution` instead of an `Explanation`,
+  using `SumPooling()` to preserve relevance conservation when pooling over the feature dimension.
+  Refer to the [XAIBase.jl changelog](https://github.com/Julia-XAI/XAIBase.jl/blob/main/CHANGELOG.md#version-v500) for more information ([#25])
+* ![BREAKING][badge-breaking] Update to Flux `v0.16.12` and Zygote `v0.7` ([#25])
+* ![Bugfix][badge-bugfix] Preserve the `pad_mode` of `Conv` and `CrossCor` layers in `canonize` and `modify_layer` ([#25])
+* ![Bugfix][badge-bugfix] Fix method ambiguities of `first`, `last` and `==` on `ChainTuple`, `ParallelTuple`, `SkipConnectionTuple` and `ModelIndex` ([#25])
+* ![Maintenance][badge-maintenance] Fix type instabilities of LRP rules with custom `lrp!` implementations ([#25])
+* ![Maintenance][badge-maintenance] Test with JET.jl and `XAIBase.test_interface` ([#25])
+* ![Documentation][badge-docs] Refer to "feature attributions" and "concept attributions" instead of "explanations" ([#25])
+
 ## Version `v3.0.0`
-* ![BREAKING][badge-breaking] Update XAIBase interface to `v4`. 
+* ![BREAKING][badge-breaking] Update XAIBase interface to `v4`.
   This adds a field to the `Explanation` return type and removes the `add_batch_dim` keyword argument.
   Refer to the [XAIBase.jl changelog](https://github.com/Julia-XAI/XAIBase.jl/blob/main/CHANGELOG.md#version-v400) for more information ([#19])
 * ![Feature][badge-feature] Add option to skip normalization of output layer relevance ([#22])
@@ -11,10 +23,10 @@
 
 ## Version `v2.0.0`
 This release removes the automatic reexport of heatmapping functionality.
-Users are now required to manually load 
+Users are now required to manually load
 [VisionHeatmaps.jl][VisionHeatmaps] and/or [TextHeatmaps.jl][TextHeatmaps].
 
-This reduces the maintenance burden for new heatmapping features 
+This reduces the maintenance burden for new heatmapping features
 and the amount of dependencies for users who don't require heatmapping functionality.
 
 * ![BREAKING][badge-breaking] Removed reexport of heatmapping functionality by updating XAIBase dependency to `v3.0.0` ([#13][#13]).
@@ -30,7 +42,7 @@ Some internal improvements were made as well:
 
 ## Version `v1.1.0`
 * ![Feature][badge-feature] Support `SkipConnection` layers ([#8][#8])
-* ![Documentation][badge-docs] Document LRP rule notation in API reference 
+* ![Documentation][badge-docs] Document LRP rule notation in API reference
   ([e11c234](https://github.com/Julia-XAI/RelevancePropagation.jl/commit/e11c234c09b7c5232acc5f254379ea5bd01d1e7c))
 
 ## Version `v1.0.1`
@@ -51,6 +63,7 @@ Initial release of RelevancePropagation.jl.
 ![Documentation][badge-docs]
 -->
 
+[#25]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/25
 [#22]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/22
 [#19]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/19
 [#14]: https://github.com/Julia-XAI/RelevancePropagation.jl/pull/14
