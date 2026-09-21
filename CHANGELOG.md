@@ -10,6 +10,7 @@
 * ![Bugfix][badge-bugfix] Fix method ambiguities of `first`, `last` and `==` on `ChainTuple`, `ParallelTuple`, `SkipConnectionTuple` and `ModelIndex` ([#25])
 * ![Maintenance][badge-maintenance] Fix type instabilities of LRP rules with custom `lrp!` implementations ([#25])
 * ![Maintenance][badge-maintenance] Test with JET.jl and `XAIBase.test_interface` ([#25])
+* ![Documentation][badge-docs] Refer to "feature attributions" and "concept attributions" instead of "explanations" ([#25])
 
 ## Version `v3.0.0`
 * ![BREAKING][badge-breaking] Update XAIBase interface to `v4`.

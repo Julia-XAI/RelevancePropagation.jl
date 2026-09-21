@@ -9,7 +9,7 @@ Attribution
 For heatmapping functionality, take a look at either
 [VisionHeatmaps.jl](https://julia-xai.github.io/XAIDocs/VisionHeatmaps/stable/) or
 [TextHeatmaps.jl](https://julia-xai.github.io/XAIDocs/TextHeatmaps/stable/).
-Both provide `heatmap` methods for visualizing explanations,
+Both provide `heatmap` methods for visualizing attributions,
 either for images or text, respectively.
 
 ## LRP analyzer

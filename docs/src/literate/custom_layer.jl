@@ -46,7 +46,7 @@ model = Chain(Dense(100, 20), MyDoublingLayer());
 # LRP should only be used on deep rectifier networks and RelevancePropagation doesn't
 # recognize `MyDoublingLayer` as a compatible layer by default.
 # It will therefore return an error and a model check summary
-# instead of returning an incorrect explanation.
+# instead of returning an incorrect feature attribution.
 #
 # However, if we know `MyDoublingLayer` is compatible with deep rectifier networks,
 # we can register it to tell RelevancePropagation that it is ok to use.

@@ -28,7 +28,7 @@ using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Me
 
 ```julia
 using RelevancePropagation
-using VisionHeatmaps         # visualization of explanations as heatmaps
+using VisionHeatmaps         # visualization of attributions as heatmaps
 using Flux, Metalhead        # pre-trained vision models in Flux
 using DataAugmentation       # input preprocessing
 using HTTP, FileIO, ImageIO  # load image from URL
@@ -58,7 +58,7 @@ attr = analyze(input, analyzer)  # or: attr = analyzer(input)
 heatmap(attr)                    # show heatmap using VisionHeatmaps.jl
 ```
 
-We can also get an explanation for the activation of the output neuron
+We can also compute a feature attribution for the activation of the output neuron
 corresponding to the "street sign" class by specifying the corresponding output neuron position `920`:
 
 ```julia

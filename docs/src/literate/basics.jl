@@ -159,18 +159,18 @@ attr.extras.layerwise_relevances
 # # analyzers don't require calling `gpu`
 # analyzer = LRP(model)
 #
-# # explanations are computed on the GPU
+# # feature attributions are computed on the GPU
 # attr = analyze(input, analyzer)
 # ```
 
-# Some operations, like saving, require moving explanations back to the CPU.
+# Some operations, like saving, require moving feature attributions back to the CPU.
 # This can be done using Flux's `cpu` function:
 
 # ```julia
 # val = attr.val |> cpu # or cpu(attr.val)
 #
 # using BSON
-# BSON.@save "explanation.bson" val
+# BSON.@save "attribution.bson" val
 # ```
 #
 # ### Using LRP without a GPU
