@@ -14,4 +14,4 @@ VisionHeatmaps = "27106da1-f8bc-4ca8-8c66-9b8289f1e035"
 
 [compat]
 Flux = ">=0.16.12"
-VisionHeatmaps = "1.4"
+VisionHeatmaps = "3"
