@@ -2,41 +2,49 @@
 # One of the design goals of RelevancePropagation.jl is to combine ease of use and
 # extensibility for the purpose of research.
 # This example will show you how to extent LRP to new layer types and activation functions.
-using Flux
+using Lux
 using RelevancePropagation
+using StableRNGs: StableRNG
 
 # ## [Model checks](@id model-checks)
 # To assure that novice users use LRP according to best practices,
 # RelevancePropagation.jl runs strict model checks when creating an `LRP` analyzer.
 #
-# Let's demonstrate this by defining a new layer type that doubles its input
-struct MyDoublingLayer end
-(::MyDoublingLayer)(x) = 2 * x
+# Let's demonstrate this by defining a new layer type that doubles its input.
+# To be used inside a Lux `Chain`, it has to subtype `Lux.AbstractLuxLayer`
+# and implement the Lux layer interface, taking `ps` and `st` and returning
+# the output alongside the updated state:
+struct MyDoublingLayer <: Lux.AbstractLuxLayer end
+(::MyDoublingLayer)(x, ps, st) = 2 * x, st
 
 mylayer = MyDoublingLayer()
-mylayer([1, 2, 3])
+mylayer([1, 2, 3], NamedTuple(), NamedTuple())
 
-# and by defining a model that uses this layer:
-model = Chain(Dense(100, 20), MyDoublingLayer());
+# Let's now define a model that uses this layer:
+model = Chain(Dense(100 => 20), MyDoublingLayer());
+ps, st = Lux.setup(StableRNG(123), model);
 
-# Creating an LRP analyzer, e.g. `LRP(model)`, will throw an `ArgumentError`
+# Creating an LRP analyzer, e.g. `LRP(model, ps, st)`, will throw an `ArgumentError`
 # and print a summary of the model check in the REPL:
 #
 # ```julia-repl
-# julia> LRP(model)
-#   ChainTuple(
-#     Dense(100 => 20)  => supported,
-#     MyDoublingLayer() => unknown layer type,
-#   ),
+# julia> LRP(model, ps, st)
+# Chain(
+#   Dense(100 => 20) => supported,
+#   MyDoublingLayer() => unknown layer type,
+# )
 #
 #   LRP model check failed
 #   ≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡
 #
-#   Found unknown layer types or activation functions that are not supported by RelevancePropagation's LRP implementation yet.
+#   Found unknown layer types or activation functions that are not supported by
+#   RelevancePropagation.jl yet.
 #
-#   LRP assumes that the model is a deep rectifier network that only contains ReLU-like activation functions.
+#   LRP assumes that the model is a deep rectifier network that only contains
+#   ReLU-like activation functions.
 #
-#   If you think the missing layer should be supported by default, please submit an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
+#   If you think the missing layer should be supported by default, please submit
+#   an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
 #
 #   [...]
 #
@@ -61,40 +69,45 @@ model = Chain(Dense(100, 20), MyDoublingLayer());
 LRP_CONFIG.supports_layer(::MyDoublingLayer) = true
 
 # Now we can create and run an analyzer without getting an error:
-analyzer = LRP(model)
+analyzer = LRP(model, ps, st)
 
 #md # !!! note "Registering functions"
 #md #
-#md #     Flux's `Chains` can also contain functions, e.g. `flatten`.
-#md #     This kind of layer can be registered as
+#md #     Lux's `Chain`s can also contain functions, which Lux wraps in
+#md #     `WrappedFunction` layers. This kind of layer can be registered by
+#md #     registering the function itself:
 #md #     ```julia
-#md #     LRP_CONFIG.supports_layer(::typeof(flatten)) = true
+#md #     LRP_CONFIG.supports_layer(::typeof(myfunction)) = true
 #md #     ```
 
 # ## Registering activation functions
 # The mechanism for registering custom activation functions is analogous to that of custom layers:
-myrelu(x) = max.(0, x)
+myrelu(x) = max(0, x)
 
-model = Chain(Dense(784, 100, myrelu), Dense(100, 10));
+model = Chain(Dense(784 => 100, myrelu), Dense(100 => 10));
+ps, st = Lux.setup(StableRNG(123), model);
 
 # Once again, creating an LRP analyzer for this model will throw an `ArgumentError`
 # and display the following model check summary:
 #
 # ```julia-repl
-# julia> LRP(model)
-#   ChainTuple(
-#     Dense(784 => 100, myrelu) => unsupported or unknown activation function myrelu,
-#     Dense(100 => 10)          => supported,
-#   ),
+# julia> LRP(model, ps, st)
+# Chain(
+#   Dense(784 => 100, myrelu) => unsupported or unknown activation function myrelu,
+#   Dense(100 => 10) => supported,
+# )
 #
 #   LRP model check failed
 #   ≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡≡
 #
-#   Found unknown layer types or activation functions that are not supported by RelevancePropagation's LRP implementation yet.
+#   Found unknown layer types or activation functions that are not supported by
+#   RelevancePropagation.jl yet.
 #
-#   LRP assumes that the model is a deep rectifier network that only contains ReLU-like activation functions.
+#   LRP assumes that the model is a deep rectifier network that only contains
+#   ReLU-like activation functions.
 #
-#   If you think the missing layer should be supported by default, please submit an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
+#   If you think the missing layer should be supported by default, please submit
+#   an issue (https://github.com/Julia-XAI/RelevancePropagation.jl/issues).
 #
 #   [...]
 #
@@ -105,19 +118,20 @@ model = Chain(Dense(784, 100, myrelu), Dense(100, 10));
 LRP_CONFIG.supports_activation(::typeof(myrelu)) = true
 
 # now the analyzer can be created without error:
-analyzer = LRP(model)
+analyzer = LRP(model, ps, st)
 
 # ## Skipping model checks
 # All model checks can be skipped at your own risk by setting the LRP-analyzer
 # keyword argument `skip_checks=true`.
-struct UnknownLayer end
-(::UnknownLayer)(x) = x
+struct UnknownLayer <: Lux.AbstractLuxLayer end
+(::UnknownLayer)(x, ps, st) = x, st
 
-unknown_activation(x) = max.(0, x)
+unknown_activation(x) = max(0, x)
 
-model = Chain(Dense(100, 20, unknown_activation), MyDoublingLayer())
+model = Chain(Dense(100 => 20, unknown_activation), UnknownLayer())
+ps, st = Lux.setup(StableRNG(123), model);
 
-LRP(model; skip_checks=true)
+LRP(model, ps, st; skip_checks=true)
 
 # Instead of throwing the usual `ERROR: Unknown layer or activation function found in model`,
 # the LRP analyzer was created without having to register either the layer `UnknownLayer`

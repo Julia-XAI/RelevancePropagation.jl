@@ -6,7 +6,7 @@
 
 Julia implementation of [Layerwise Relevance Propagation][paper-lrp] (LRP) 
 and [Concept Relevance Propagation][paper-crp] (CRP) 
-for use with [Flux.jl](https://fluxml.ai) models.
+for use with [Lux.jl](https://lux.csail.mit.edu) models.
 
 This package is part of the [Julia-XAI ecosystem](https://github.com/Julia-XAI) and compatible with
 [ExplainableAI.jl](https://github.com/Julia-XAI/ExplainableAI.jl).
@@ -19,23 +19,25 @@ julia> ]add RelevancePropagation
 
 ## Example
 Let's use LRP to explain why an image of a castle gets classified as such 
-using a pre-trained VGG16 model from [Metalhead.jl](https://github.com/FluxML/Metalhead.jl):
+using a pre-trained VGG16 model from [Boltz.jl](https://github.com/LuxDL/Boltz.jl):
 
 ![][castle]
 
 ```julia
 using RelevancePropagation
-using VisionHeatmaps         # visualization of explanations as heatmaps
-using Flux, Metalhead        # pre-trained vision models in Flux
-using DataAugmentation       # input preprocessing
-using HTTP, FileIO, ImageIO  # load image from URL
-using ImageInTerminal        # show heatmap in terminal
-
+using VisionHeatmaps          # visualization of explanations as heatmaps
+using Lux, Boltz              # pre-trained vision models in Lux
+using DataAugmentation        # input preprocessing
+using HTTP, FileIO, ImageIO   # load image from URL
+using ImageInTerminal         # show heatmap in terminal
+using Random
 
 # Load & prepare model
-model = VGG(16, pretrain=true).layers
-model = strip_softmax(model)
-model = canonize(model)
+model = Vision.VGG(16; pretrained=true)
+parameters, state = Lux.setup(Random.Xoshiro(0), model) # pre-trained weights are loaded by setup
+model, parameters, state = flatten_model(               # unwrap Boltz's model wrappers and flatten
+    model, parameters, state; unwrap=Base.Fix2(isa, Lux.AbstractLuxWrapperLayer)
+)
 
 # Load input
 url = HTTP.URI("https://raw.githubusercontent.com/Julia-XAI/ExplainableAI.jl/gh-pages/assets/heatmaps/castle.jpg")
@@ -45,12 +47,12 @@ img = load(url)
 mean = (0.485f0, 0.456f0, 0.406f0)
 std  = (0.229f0, 0.224f0, 0.225f0)
 tfm = CenterResizeCrop((224, 224)) |> ImageToTensor() |> Normalize(mean, std)
-input = apply(tfm, Image(img))               # apply DataAugmentation transform
-input = reshape(input.data, 224, 224, 3, :)  # unpack data and add batch dimension
+input = DataAugmentation.apply(tfm, Image(img)) # apply DataAugmentation transform
+input = reshape(input.data, 224, 224, 3, :)     # unpack data and add batch dimension
 
 # Run XAI method
 composite = EpsilonPlusFlat()
-analyzer = LRP(model, composite)
+analyzer = LRP(model, parameters, state, composite)
 expl = analyze(input, analyzer)  # or: expl = analyzer(input)
 heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
 ```

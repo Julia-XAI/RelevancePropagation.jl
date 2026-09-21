@@ -1,32 +1,43 @@
+# Adapted from v3:
+# - rules are NamedTuples mirroring the model's `ps`/`st` instead of ChainTuples
+# - `LayerMap` addresses layers via `Functors.KeyPath` instead of `ModelIndex`
+# - v3 used Metalhead's VGG11; rule assignment only depends on layer types and
+#   positions, so slim VGG11-shaped Lux models are used instead.
 using RelevancePropagation
 using Test
 using ReferenceTests
 
-using NNlib
-using Flux
-using Flux: flatten, Scale
-using Metalhead
+using Lux
+using Functors: KeyPath
+using StableRNGs: StableRNG
 
-model = VGG(11; pretrain=false).layers
-model_flat = flatten_model(model)
-Flux.testmode!(model, true)
-Flux.testmode!(model_flat, true)
-
-# Test default composites
-const DEFAULT_COMPOSITES = Dict(
-    "EpsilonGammaBox"        => EpsilonGammaBox(-3.0f0, 3.0f0),
-    "EpsilonPlus"            => EpsilonPlus(),
-    "EpsilonAlpha2Beta1"     => EpsilonAlpha2Beta1(),
-    "EpsilonPlusFlat"        => EpsilonPlusFlat(),
-    "EpsilonAlpha2Beta1Flat" => EpsilonAlpha2Beta1Flat(),
+# VGG11-shaped models with slim channels: Chain(features, classifier) like
+# Metalhead's `VGG(11).layers`, and its 19-layer flat equivalent.
+features = Chain(
+    Conv((3, 3), 1 => 2, relu; pad=1),
+    MaxPool((2, 2)),
+    Conv((3, 3), 2 => 3, relu; pad=1),
+    MaxPool((2, 2)),
+    Conv((3, 3), 3 => 4, relu; pad=1),
+    Conv((3, 3), 4 => 4, relu; pad=1),
+    MaxPool((2, 2)),
+    Conv((3, 3), 4 => 5, relu; pad=1),
+    Conv((3, 3), 5 => 5, relu; pad=1),
+    MaxPool((2, 2)),
+    Conv((3, 3), 5 => 5, relu; pad=1),
+    Conv((3, 3), 5 => 5, relu; pad=1),
+    MaxPool((2, 2)),
 )
-for (name, c) in DEFAULT_COMPOSITES
-    @test_reference "references/show/$name.txt" repr("text/plain", c)
-end
-
-@test_reference "references/show/show_layer_indices.txt" repr(
-    "text/plain", show_layer_indices(model)
+classifier = Chain(
+    FlattenLayer(),
+    Dense(5 => 8, relu),
+    Dropout(0.5f0),
+    Dense(8 => 8, relu),
+    Dropout(0.5f0),
+    Dense(8 => 10),
 )
+model = Chain(features, classifier)
+model_flat = Chain(features.layers..., classifier.layers...)
 
 # This composite is non-sensical, but covers many composite primitives
 composite1 = Composite(
@@ -44,38 +55,35 @@ composite1 = Composite(
     RangeMap(18:19, ZeroRule()),
     LastLayerMap(PassRule()),
 )
-@test_reference "references/show/composite1.txt" repr("text/plain", composite1)
-
-analyzer1 = LRP(model_flat, composite1; flatten=false)
-@test analyzer1.rules == ChainTuple(
-    ZBoxRule(-3.0f0, 3.0f0),
-    EpsilonRule(1.0f-6),
-    FlatRule(),
-    EpsilonRule(1.0f-5),
-    FlatRule(),
-    FlatRule(),
-    EpsilonRule(1.0f-5),
-    AlphaBetaRule(2.0f0, 1.0f0),
-    AlphaBetaRule(1.0f0, 0.0f0),
-    EpsilonRule(1.0f-5),
-    AlphaBetaRule(2.0f0, 1.0f0),
-    AlphaBetaRule(2.0f0, 1.0f0),
-    EpsilonRule(1.0f-6),
-    PassRule(),
-    EpsilonRule(1.0f-6),
-    PassRule(),
-    EpsilonRule(1.0f-6),
-    ZeroRule(),
-    PassRule(),
+rules1 = lrp_rules(model_flat, composite1)
+@test rules1 == (;
+    layer_1=ZBoxRule(-3.0f0, 3.0f0),
+    layer_2=EpsilonRule(1.0f-6),
+    layer_3=FlatRule(),
+    layer_4=EpsilonRule(1.0f-5),
+    layer_5=FlatRule(),
+    layer_6=FlatRule(),
+    layer_7=EpsilonRule(1.0f-5),
+    layer_8=AlphaBetaRule(2.0f0, 1.0f0),
+    layer_9=AlphaBetaRule(1.0f0, 0.0f0),
+    layer_10=EpsilonRule(1.0f-5),
+    layer_11=AlphaBetaRule(2.0f0, 1.0f0),
+    layer_12=AlphaBetaRule(2.0f0, 1.0f0),
+    layer_13=EpsilonRule(1.0f-6),
+    layer_14=PassRule(),
+    layer_15=EpsilonRule(1.0f-6),
+    layer_16=PassRule(),
+    layer_17=EpsilonRule(1.0f-6),
+    layer_18=ZeroRule(),
+    layer_19=PassRule(),
 )
-@test_reference "references/show/lrp1.txt" repr("text/plain", analyzer1)
 
 model2 = Chain(
     Conv((5, 5), 1 => 6, relu),
     MaxPool((2, 2)),
     Conv((5, 5), 6 => 16, relu),
     MaxPool((2, 2)),
-    Flux.flatten,
+    FlattenLayer(),
     Dense(256 => 120, relu),
     Dense(120 => 84, relu),
     Dense(84 => 10),
@@ -86,20 +94,17 @@ composite2 = Composite(
         Dense => AlphaBetaRule(1.0f0, 0.0f0), Conv => AlphaBetaRule(2.0f0, 1.0f0)
     ),
 )
-@test_reference "references/show/composite2.txt" repr("text/plain", composite2)
-
-analyzer2 = LRP(model2, composite2; flatten=false)
-@test analyzer2.rules == ChainTuple(
-    AlphaBetaRule(2.0f0, 1.0f0),
-    ZeroRule(),
-    ZeroRule(),
-    ZeroRule(),
-    ZeroRule(),
-    ZeroRule(),
-    ZeroRule(),
-    EpsilonRule(2.0f-5),
+rules2 = lrp_rules(model2, composite2)
+@test rules2 == (;
+    layer_1=AlphaBetaRule(2.0f0, 1.0f0),
+    layer_2=ZeroRule(),
+    layer_3=ZeroRule(),
+    layer_4=ZeroRule(),
+    layer_5=ZeroRule(),
+    layer_6=ZeroRule(),
+    layer_7=ZeroRule(),
+    layer_8=EpsilonRule(2.0f-5),
 )
-@test_reference "references/show/lrp2.txt" repr("text/plain", analyzer2)
 
 composite3 = Composite(
     GlobalTypeMap(
@@ -111,31 +116,93 @@ composite3 = Composite(
     FirstLayerTypeMap(ConvLayer => FlatRule(), Dense => FlatRule()),
     LastLayerMap(EpsilonRule(1.0f-5)),
 )
-
-analyzer3 = LRP(model, composite3; flatten=false)
-@test analyzer3.rules == ChainTuple(
-    ChainTuple(
-        FlatRule(),
-        ZeroRule(),
-        ZPlusRule(),
-        ZeroRule(),
-        ZPlusRule(),
-        ZPlusRule(),
-        ZeroRule(),
-        ZPlusRule(),
-        ZPlusRule(),
-        ZeroRule(),
-        ZPlusRule(),
-        ZPlusRule(),
-        ZeroRule(),
+rules3 = lrp_rules(model, composite3)
+@test rules3 == (;
+    layer_1=(;
+        layer_1=FlatRule(),
+        layer_2=ZeroRule(),
+        layer_3=ZPlusRule(),
+        layer_4=ZeroRule(),
+        layer_5=ZPlusRule(),
+        layer_6=ZPlusRule(),
+        layer_7=ZeroRule(),
+        layer_8=ZPlusRule(),
+        layer_9=ZPlusRule(),
+        layer_10=ZeroRule(),
+        layer_11=ZPlusRule(),
+        layer_12=ZPlusRule(),
+        layer_13=ZeroRule(),
     ),
-    ChainTuple(
-        PassRule(),
-        EpsilonRule(1.0f-6),
-        PassRule(),
-        EpsilonRule(1.0f-6),
-        PassRule(),
-        EpsilonRule(1.0f-5),
+    layer_2=(;
+        layer_1=PassRule(),
+        layer_2=EpsilonRule(),
+        layer_3=PassRule(),
+        layer_4=EpsilonRule(),
+        layer_5=PassRule(),
+        layer_6=EpsilonRule(1.0f-5),
     ),
 )
+
+# LayerMap addresses nested layers via KeyPath (integer/tuple conveniences map
+# to Lux's default `layer_i` naming) and matches all layers below the path.
+@test LayerMap(2, EpsilonRule()) == LayerMap(KeyPath(:layer_2), EpsilonRule())
+@test LayerMap((1, 5), EpsilonRule()) ==
+    LayerMap(KeyPath(:layer_1, :layer_5), EpsilonRule())
+model4 = Chain(Dense(2 => 2), Chain(Dense(2 => 2), Dense(2 => 2)), Dense(2 => 2))
+composite4 = Composite(
+    LayerMap((2, 1), EpsilonRule()), LayerMap(KeyPath(:layer_3), GammaRule())
+)
+@test lrp_rules(model4, composite4) == (;
+    layer_1=ZeroRule(),
+    layer_2=(; layer_1=EpsilonRule(), layer_2=ZeroRule()),
+    layer_3=GammaRule(),
+)
+composite5 = Composite(LayerMap(2, EpsilonRule())) # prefix matches the whole sub-chain
+@test lrp_rules(model4, composite5) == (;
+    layer_1=ZeroRule(),
+    layer_2=(; layer_1=EpsilonRule(), layer_2=EpsilonRule()),
+    layer_3=ZeroRule(),
+)
+
+# Bare functions in a Chain are wrapped in `WrappedFunction`;
+# type maps match the wrapped function itself.
+model6 = Chain(Dense(2 => 2, relu), identity)
+composite6 = Composite(
+    GlobalTypeMap(typeof(identity) => PassRule(), Dense => EpsilonRule())
+)
+@test lrp_rules(model6, composite6) == (; layer_1=EpsilonRule(), layer_2=PassRule())
+
+# Show reference tests
+DEFAULT_COMPOSITES = Dict(
+    "EpsilonGammaBox"        => EpsilonGammaBox(-3.0f0, 3.0f0),
+    "EpsilonPlus"            => EpsilonPlus(),
+    "EpsilonAlpha2Beta1"     => EpsilonAlpha2Beta1(),
+    "EpsilonPlusFlat"        => EpsilonPlusFlat(),
+    "EpsilonAlpha2Beta1Flat" => EpsilonAlpha2Beta1Flat(),
+)
+for (name, c) in DEFAULT_COMPOSITES
+    @test_reference "references/show/$name.txt" repr("text/plain", c)
+end
+
+@test_reference "references/show/show_layer_indices.txt" repr(
+    "text/plain", show_layer_indices(model)
+)
+
+@test_reference "references/show/composite1.txt" repr("text/plain", composite1)
+@test_reference "references/show/composite2.txt" repr("text/plain", composite2)
+
+# Analyzer show tests on the slim VGG11 models
+ps_flat, st_flat = Lux.setup(StableRNG(123), model_flat)
+analyzer1 = LRP(model_flat, ps_flat, st_flat, composite1)
+@test analyzer1.rules == rules1
+@test_reference "references/show/lrp1.txt" repr("text/plain", analyzer1)
+
+ps2, st2 = Lux.setup(StableRNG(123), model2)
+analyzer2 = LRP(model2, ps2, st2, composite2)
+@test analyzer2.rules == rules2
+@test_reference "references/show/lrp2.txt" repr("text/plain", analyzer2)
+
+ps, st = Lux.setup(StableRNG(123), model)
+analyzer3 = LRP(model, ps, st, composite3)
+@test analyzer3.rules == rules3
 @test_reference "references/show/lrp3.txt" repr("text/plain", analyzer3)

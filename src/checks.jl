@@ -1,3 +1,11 @@
+"""
+    LRP_CONFIG
+
+Configuration module for the LRP model checks.
+Extend [`LRP_CONFIG.supports_layer`](@ref) and
+[`LRP_CONFIG.supports_activation`](@ref) to register custom layers and
+activation functions as LRP-compatible.
+"""
 module LRP_CONFIG
 using RelevancePropagation
 using RelevancePropagation: LRPSupportedLayer, LRPSupportedActivation
@@ -31,11 +39,29 @@ end # LRP_CONFIG module
 lrp_check_layer(l) = lrp_check_layer_type(l) && lrp_check_activation(l)
 
 lrp_check_layer_type(l) = LRP_CONFIG.supports_layer(l)
+# Lux wraps bare functions used as layers in `WrappedFunction`;
+# users register the wrapped function itself via `LRP_CONFIG.supports_layer`.
+# Split-out activations are broadcasts of the activation function,
+# which `wrapped_function` sees through.
+lrp_check_layer_type(l::WrappedFunction) = LRP_CONFIG.supports_layer(wrapped_function(l))
 
 function lrp_check_activation(layer)
     f = activation_fn(layer)
     !isnothing(f) && return LRP_CONFIG.supports_activation(f)
     return true
+end
+
+# The LRP backward pass distributes relevance between branches assuming they
+# are combined additively (see the `Parallel` and `SkipConnection` handlers in
+# `lrp.jl`). Any other `connection` would silently produce wrong relevances,
+# so the model checks reject it.
+lrp_check_connection(layer) = true
+lrp_check_connection(p::Parallel) = p.connection === +
+lrp_check_connection(s::SkipConnection) = s.connection === +
+
+lrp_check_connections(layer) = true
+function lrp_check_connections(model::DataflowLayer)
+    return lrp_check_connection(model) && all(lrp_check_connections, children_layers(model))
 end
 
 """
@@ -44,7 +70,7 @@ end
 Check whether LRP can be used on the model.
 """
 function check_lrp_compat(model::Chain; verbose=true)
-    passed_checks = chainall(lrp_check_layer, model)
+    passed_checks = chainall(lrp_check_layer, model) && lrp_check_connections(model)
     if !passed_checks
         if verbose
             print_lrp_model_check(stdout, model)
@@ -52,9 +78,53 @@ function check_lrp_compat(model::Chain; verbose=true)
             display(_MD_CHECK_FAILED)
             println()
         end
-        error("Unknown layer or activation function found in model")
+        error("Unsupported layer, activation function, or connection found in model")
     end
     return true
+end
+
+function print_lrp_model_check(io::IO, model::DataflowLayer, indent::Int=0)
+    print(io, "  "^indent, nameof(typeof(model)), "(")
+    if !lrp_check_connection(model)
+        printstyled(
+            io,
+            " => unsupported connection `$(model.connection)`, LRP assumes `+`";
+            color=:red,
+        )
+    end
+    println(io)
+    for layer in children_layers(model)
+        print_lrp_model_check(io, layer, indent + 1)
+    end
+    println(io, "  "^indent, indent == 0 ? ")" : "),")
+end
+
+function print_lrp_model_check(io::IO, layer, indent::Int=0)
+    print(io, "  "^indent, layer)
+    print(io, " => ")
+    print_layer_check(io, layer)
+    println(io, ",")
+end
+
+function print_layer_check(io, l)
+    layer_failed = !lrp_check_layer_type(l)
+    activ_failed = !lrp_check_activation(l)
+    activ = activation_fn(l)
+
+    if layer_failed && activ_failed
+        return printstyled(
+            io,
+            "unsupported or unknown activation function $activ and layer type";
+            color=:red,
+        )
+    elseif activ_failed
+        return printstyled(
+            io, "unsupported or unknown activation function $activ"; color=:red
+        )
+    elseif layer_failed
+        return printstyled(io, "unknown layer type"; color=:red)
+    end
+    return printstyled(io, "supported"; color=:green)
 end
 
 _MD_CHECK_FAILED = md"""# LRP model check failed
@@ -64,6 +134,8 @@ _MD_CHECK_FAILED = md"""# LRP model check failed
 
     LRP assumes that the model is a deep rectifier network
     that only contains ReLU-like activation functions.
+    `Parallel` and `SkipConnection` layers must combine their branches
+    additively (`connection = +`).
 
     If you think the missing layer should be supported by default,
     **please [submit an issue](https://github.com/Julia-XAI/RelevancePropagation.jl/issues)**.
@@ -91,3 +163,21 @@ _MD_CHECK_FAILED = md"""# LRP model check failed
     Model checks can be skipped at your own risk by setting
     the `LRP` keyword argument `skip_checks=true`.
     """
+
+#=========================#
+# Check output activation #
+#=========================#
+
+"""
+  check_output_softmax(model)
+
+Check whether model has softmax activation on output.
+Return the model if it doesn't, throw error otherwise.
+"""
+function check_output_softmax(model::Chain)
+    if has_output_softmax(model)
+        throw(ArgumentError("""Model contains softmax activation function on output.
+        Call `strip_softmax` on your model."""))
+    end
+    return model
+end

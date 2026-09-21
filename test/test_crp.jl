@@ -1,23 +1,23 @@
 using RelevancePropagation
 using Test
 
-using Flux
+using Lux
 
 @testset "CRP analytic" begin
     W1 = [1.0 3.0; 4.0 2.0]
     b1 = [0.0, 1.0]
-    d1 = Dense(W1, b1, identity)
 
     W2 = [2.0 4.0; 3.0 1.0]
     b2 = [1.0, 2.0]
-    d2 = Dense(W2, b2, identity)
 
-    model = Chain(d1, d2)
+    model = Chain(Dense(2 => 2, identity), Dense(2 => 2, identity))
+    ps = (; layer_1=(; weight=W1, bias=b1), layer_2=(; weight=W2, bias=b2))
+    st = (; layer_1=NamedTuple(), layer_2=NamedTuple())
     input = reshape([1.0 2.0], 2, 1)
 
     layer_index = 1
     features = TopNFeatures(1)
-    analyzer = CRP(LRP(model), layer_index, features)
+    analyzer = CRP(LRP(model, ps, st), layer_index, features)
 
     # Analytic solution:
     # a¹ = input
@@ -34,4 +34,7 @@ using Flux
 
     expl = analyzer(input)
     @test expl.val ≈ [16 / 51, 16 / 51]
+
+    # Layer index must be smaller than model length
+    @test_throws ArgumentError CRP(LRP(model, ps, st), 2, features)
 end
