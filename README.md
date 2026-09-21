@@ -54,8 +54,8 @@ input = reshape(input.data, 224, 224, 3, :)  # unpack data and add batch dimensi
 # Run XAI method
 composite = EpsilonPlusFlat()
 analyzer = LRP(model, composite)
-expl = analyze(input, analyzer)  # or: expl = analyzer(input)
-heatmap(expl)                    # show heatmap using VisionHeatmaps.jl
+attr = analyze(input, analyzer)  # or: attr = analyzer(input)
+heatmap(attr)                    # show heatmap using VisionHeatmaps.jl
 ```
 
 We can also get an explanation for the activation of the output neuron

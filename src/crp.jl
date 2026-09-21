@@ -90,5 +90,5 @@ function call_analyzer(
             end
         end
     end
-    return Explanation(R_return, input, last(as), ns(last(as)), :CRP, :attribution, nothing)
+    return Attribution(R_return, input, last(as), ns(last(as)), SumPooling())
 end

@@ -71,7 +71,9 @@ function call_analyzer(
     mask_output_neuron!(Rs[end], as[end], ns, lrp.normalize_output_relevance) # compute relevance Rᴺ of output layer N
     lrp_backward_pass!(Rs, as, lrp.rules, lrp.model, lrp.modified_layers)
     extras = layerwise_relevances ? (layerwise_relevances=Rs,) : nothing
-    return Explanation(first(Rs), input, last(as), ns(last(as)), :LRP, :attribution, extras)
+    return Attribution(
+        first(Rs), input, last(as), ns(last(as)), SumPooling(); extras=extras
+    )
 end
 
 get_activations(model, input) = (input, Flux.activations(model, input)...)

@@ -32,6 +32,6 @@ using Flux
     # R¹[1] = 1/7 * 0 + 4/9 * 36/51 = 16//51
     # R¹[2] = 6/7 * 0 + 4/9 * 36/51 = 16//51
 
-    expl = analyzer(input)
-    @test expl.val ≈ [16 / 51, 16 / 51]
+    attr = analyzer(input)
+    @test attr.val ≈ [16 / 51, 16 / 51]
 end
